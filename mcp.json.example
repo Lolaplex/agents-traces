@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agents-traces": {
+      "command": "python",
+      "args": ["-m", "agents_traces", "serve"]
+    }
+  }
+}
