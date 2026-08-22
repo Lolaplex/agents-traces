@@ -16,6 +16,18 @@ from .models import TraceEvent
 from .store import TraceStore, get_default_traces_dir
 
 _global_store: Optional[TraceStore] = None
+_process_session_id: Optional[str] = None
+
+
+def _process_session() -> str:
+    """Stable per-process session id — every live event from this process
+    shares it, and different processes never collide."""
+    global _process_session_id
+    if _process_session_id is None:
+        import uuid
+
+        _process_session_id = f"proc-{uuid.uuid4().hex[:8]}"
+    return _process_session_id
 
 
 def is_tracing_enabled() -> bool:
@@ -32,6 +44,18 @@ def get_global_store() -> TraceStore:
     return _global_store
 
 
+def _summarize(res: Any, limit: int = 300) -> Optional[str]:
+    """Truncated result summary — enough to verify hits offline without
+    storing full payloads."""
+    if res is None:
+        return None
+    try:
+        text = res if isinstance(res, str) else json.dumps(res, default=str)
+    except Exception:
+        text = str(res)
+    return text[:limit]
+
+
 def append_trace(
     type: str = "tool_call",
     tool: Optional[str] = None,
@@ -46,10 +70,11 @@ def append_trace(
     if not is_tracing_enabled():
         return
 
-    sid = session or os.environ.get("AGENTS_SESSION_ID") or "agent-active"
+    sid = session or os.environ.get("AGENTS_SESSION_ID") or _process_session()
     event = TraceEvent(
         session=sid,
         type=type,
+        origin="live",
         tool=tool,
         args=args,
         status=status,
@@ -65,10 +90,12 @@ def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
     Decorator for tool functions. Automatically measures duration, catches errors,
     and appends every execution to ~/.agents/traces/YYYY-MM-DD.jsonl with zero overhead.
     """
+
     def decorator(fn: Callable) -> Callable:
         tool_name = name or fn.__name__
 
         if inspect.iscoroutinefunction(fn):
+
             @functools.wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 if not is_tracing_enabled():
@@ -77,14 +104,30 @@ def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
                 try:
                     res = await fn(*args, **kwargs)
                     dur = (time.perf_counter() - t0) * 1000.0
-                    append_trace(type="tool_call", tool=tool_name, args=kwargs, status="ok", duration_ms=dur)
+                    append_trace(
+                        type="tool_call",
+                        tool=tool_name,
+                        args=kwargs,
+                        status="ok",
+                        duration_ms=dur,
+                        result=_summarize(res),
+                    )
                     return res
                 except Exception as e:
                     dur = (time.perf_counter() - t0) * 1000.0
-                    append_trace(type="tool_call", tool=tool_name, args=kwargs, status="error", error=str(e), duration_ms=dur)
+                    append_trace(
+                        type="tool_call",
+                        tool=tool_name,
+                        args=kwargs,
+                        status="error",
+                        error=str(e),
+                        duration_ms=dur,
+                    )
                     raise
+
             return async_wrapper
         else:
+
             @functools.wraps(fn)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 if not is_tracing_enabled():
@@ -93,12 +136,27 @@ def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
                 try:
                     res = fn(*args, **kwargs)
                     dur = (time.perf_counter() - t0) * 1000.0
-                    append_trace(type="tool_call", tool=tool_name, args=kwargs, status="ok", duration_ms=dur)
+                    append_trace(
+                        type="tool_call",
+                        tool=tool_name,
+                        args=kwargs,
+                        status="ok",
+                        duration_ms=dur,
+                        result=_summarize(res),
+                    )
                     return res
                 except Exception as e:
                     dur = (time.perf_counter() - t0) * 1000.0
-                    append_trace(type="tool_call", tool=tool_name, args=kwargs, status="error", error=str(e), duration_ms=dur)
+                    append_trace(
+                        type="tool_call",
+                        tool=tool_name,
+                        args=kwargs,
+                        status="error",
+                        error=str(e),
+                        duration_ms=dur,
+                    )
                     raise
+
             return sync_wrapper
 
     if func is not None:

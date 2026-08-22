@@ -27,8 +27,12 @@ from .store import TraceStore
 
 def _expand(raw_path: str) -> Path:
     appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    localappdata = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    expanded = raw_path.replace("%APPDATA%", appdata).replace("%LOCALAPPDATA%", localappdata)
+    localappdata = os.environ.get("LOCALAPPDATA") or str(
+        Path.home() / "AppData" / "Local"
+    )
+    expanded = raw_path.replace("%APPDATA%", appdata).replace(
+        "%LOCALAPPDATA%", localappdata
+    )
     return Path(os.path.expanduser(os.path.expandvars(expanded)))
 
 
@@ -45,7 +49,7 @@ def discover_antigravity_transcripts() -> List[Path]:
 def parse_antigravity_transcript(path: Path) -> Generator[TraceEvent, None, None]:
     conv_id = path.parent.parent.parent.name
     sid = f"agy-{conv_id[:8]}"
-    
+
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             line = line.strip()
@@ -56,17 +60,47 @@ def parse_antigravity_transcript(path: Path) -> Generator[TraceEvent, None, None
             except Exception:
                 continue
 
-            ts = item.get("created_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            ts = item.get("created_at") or datetime.now(
+                timezone.utc
+            ).isoformat().replace("+00:00", "Z")
             step_type = item.get("type")
-            
+
             if step_type == "USER_INPUT":
                 yield TraceEvent(
                     ts=ts,
                     session=sid,
+                    type="message",
+                    origin="ingested",
+                    metadata={
+                        "source": "antigravity",
+                        "role": "user",
+                        "content": str(item.get("content", ""))[:2000],
+                    },
+                )
+                yield TraceEvent(
+                    ts=ts,
+                    session=sid,
                     type="session_start",
-                    metadata={"source": "antigravity", "prompt": str(item.get("content", ""))[:120]},
+                    origin="ingested",
+                    metadata={
+                        "source": "antigravity",
+                        "prompt": str(item.get("content", ""))[:120],
+                    },
                 )
             elif step_type == "PLANNER_RESPONSE":
+                content = str(item.get("content", ""))
+                if content.strip():
+                    yield TraceEvent(
+                        ts=ts,
+                        session=sid,
+                        type="message",
+                        origin="ingested",
+                        metadata={
+                            "source": "antigravity",
+                            "role": "assistant",
+                            "content": content[:2000],
+                        },
+                    )
                 tool_calls = item.get("tool_calls") or []
                 for tc in tool_calls:
                     t_name = tc.get("name")
@@ -74,16 +108,25 @@ def parse_antigravity_transcript(path: Path) -> Generator[TraceEvent, None, None
                     t_args = {}
                     if isinstance(t_args_raw, dict):
                         for k, v in t_args_raw.items():
-                            if isinstance(v, str) and v.startswith('"') and v.endswith('"'):
+                            if (
+                                isinstance(v, str)
+                                and v.startswith('"')
+                                and v.endswith('"')
+                            ):
                                 t_args[k] = v.strip('"')
                             else:
                                 t_args[k] = v
-                    
-                    if t_name in ["write_to_file", "replace_file_content", "multi_replace_file_content"]:
+
+                    if t_name in [
+                        "write_to_file",
+                        "replace_file_content",
+                        "multi_replace_file_content",
+                    ]:
                         yield TraceEvent(
                             ts=ts,
                             session=sid,
                             type="file_edit",
+                            origin="ingested",
                             file=t_args.get("TargetFile"),
                             tool=t_name,
                             status="ok",
@@ -94,18 +137,29 @@ def parse_antigravity_transcript(path: Path) -> Generator[TraceEvent, None, None
                             ts=ts,
                             session=sid,
                             type="tool_call",
+                            origin="ingested",
                             tool=t_name,
                             args=t_args,
                             status="ok",
                             metadata={"source": "antigravity"},
                         )
-            elif step_type in ["RUN_COMMAND", "VIEW_FILE", "LIST_DIRECTORY", "GREP_SEARCH"]:
+            elif step_type in [
+                "RUN_COMMAND",
+                "VIEW_FILE",
+                "LIST_DIRECTORY",
+                "GREP_SEARCH",
+            ]:
                 content = str(item.get("content", ""))
-                if "exited with code 1" in content or "Traceback" in content or "Error" in content:
+                if (
+                    "exited with code 1" in content
+                    or "Traceback" in content
+                    or "Error" in content
+                ):
                     yield TraceEvent(
                         ts=ts,
                         session=sid,
                         type="error",
+                        origin="ingested",
                         error=content[:200],
                         status="error",
                         metadata={"source": "antigravity"},
@@ -132,12 +186,15 @@ def parse_claude_transcript(path: Path) -> Generator[TraceEvent, None, None]:
         if isinstance(data, list):
             for item in data:
                 if isinstance(item, dict):
-                    ts = item.get("timestamp") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    ts = item.get("timestamp") or datetime.now(
+                        timezone.utc
+                    ).isoformat().replace("+00:00", "Z")
                     msg_type = item.get("type", "custom")
                     yield TraceEvent(
                         ts=ts,
                         session=sid,
                         type=msg_type,
+                        origin="ingested",
                         tool=item.get("tool"),
                         status=item.get("status", "ok"),
                         metadata={"source": "claude"},
@@ -152,8 +209,12 @@ def parse_claude_transcript(path: Path) -> Generator[TraceEvent, None, None]:
 def discover_cline_tasks() -> List[Path]:
     paths = []
     if sys.platform == "win32":
-        roo_dir = _expand("%APPDATA%/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks")
-        cline_dir = _expand("%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/tasks")
+        roo_dir = _expand(
+            "%APPDATA%/Code/User/globalStorage/rooveterinaryinc.roo-cline/tasks"
+        )
+        cline_dir = _expand(
+            "%APPDATA%/Code/User/globalStorage/saoudrizwan.claude-dev/tasks"
+        )
         for d in [roo_dir, cline_dir]:
             if d.exists():
                 paths.extend(d.glob("*/api_conversation_history.json"))
@@ -175,6 +236,7 @@ def parse_cline_task(path: Path) -> Generator[TraceEvent, None, None]:
                         ts=ts,
                         session=sid,
                         type="tool_call",
+                        origin="ingested",
                         tool=str(msg.get("text", ""))[:40],
                         status="ok",
                         metadata={"source": "cline"},
@@ -184,6 +246,7 @@ def parse_cline_task(path: Path) -> Generator[TraceEvent, None, None]:
                         ts=ts,
                         session=sid,
                         type="error",
+                        origin="ingested",
                         error=str(msg.get("text", ""))[:200],
                         status="error",
                         metadata={"source": "cline"},
