@@ -154,3 +154,80 @@ def format_stats_text(stats: Dict[str, Any], label: str = "Heute") -> str:
         lines.append("• Errors:        \033[32m0 errors (all green)\033[0m")
         
     return "\n".join(lines)
+
+
+def compute_model_breakdown(events: Iterable[TraceEvent]) -> Dict[str, Any]:
+    """Compute per-model aggregated metrics and empirical failure insights."""
+    event_list = list(events)
+    
+    # 1. Map sessions to active model if known
+    session_to_model: Dict[str, str] = {}
+    for e in event_list:
+        if e.model and e.session:
+            session_to_model[e.session] = e.model
+
+    # 2. Group events by model
+    model_events: Dict[str, List[TraceEvent]] = defaultdict(list)
+    for e in event_list:
+        m = e.model or session_to_model.get(e.session or "", "unspecified")
+        model_events[m].append(e)
+
+    breakdown: Dict[str, Any] = {}
+    for model_name, m_events in sorted(model_events.items(), key=lambda x: len(x[1]), reverse=True):
+        m_stats = compute_stats(m_events)
+        
+        # Derive empirical traps & insights
+        insights = []
+        for t in m_stats.get("top_tools", []):
+            t_name = t["tool"]
+            t_count = t["count"]
+            t_errs = t["errors"]
+            if t_count >= 2 and (t_errs / t_count) >= 0.15:
+                rate_pct = round(t_errs / t_count * 100, 1)
+                insights.append(f"High failure rate on `{t_name}` ({rate_pct}% errors in {t_count} calls).")
+        
+        if m_stats.get("tool_calls_total", 0) > 0 and m_stats.get("tool_success_rate", 100) < 80.0:
+            insights.append("Overall tool success rate under 80% — recommend stricter step verification.")
+            
+        breakdown[model_name] = {
+            "model": model_name,
+            "stats": m_stats,
+            "empirical_insights": insights,
+        }
+
+    return {
+        "models_count": len(breakdown),
+        "total_events": len(event_list),
+        "models": breakdown,
+    }
+
+
+def format_model_breakdown_text(data: Dict[str, Any], label: str = "7 Tage") -> str:
+    """Format per-model telemetry and insights for terminal display."""
+    lines = []
+    lines.append(f"\033[1;36m=== agents-traces model analysis ({label}) ===\033[0m")
+    lines.append(f"• Active Models: \033[1m{data['models_count']}\033[0m | Total Events: {data['total_events']}")
+    lines.append("")
+
+    for m_name, m_info in data.get("models", {}).items():
+        st = m_info["stats"]
+        lines.append(f"\033[1;33m► Model: {m_name}\033[0m")
+        lines.append(f"  • Tokens:      {st['total_tokens']:,} (Cost: ${st['est_cost_usd']:.4f})")
+        lines.append(f"  • Tool Calls:  {st['tool_calls_total']} (Success: \033[32m{st['tool_success_rate']:.1f}%\033[0m | Errors: {st['tool_calls_error']})")
+        
+        if st["top_tools"]:
+            tool_parts = []
+            for t in st["top_tools"][:4]:
+                err_note = f" (\033[31m{t['errors']} err\033[0m)" if t["errors"] > 0 else ""
+                tool_parts.append(f"{t['tool']}: {t['count']}x{err_note}")
+            lines.append(f"  • Top Tools:   {', '.join(tool_parts)}")
+
+        insights = m_info.get("empirical_insights", [])
+        if insights:
+            lines.append("  • \033[1;35mEmpirical Traps Detected:\033[0m")
+            for ins in insights:
+                lines.append(f"    ⚠️  {ins}")
+        lines.append("")
+
+    return "\n".join(lines)
+

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from mcp.server.fastmcp import FastMCP
 
 from .models import TraceEvent
-from .stats import compute_stats
+from .stats import compute_model_breakdown, compute_stats
 from .store import TraceStore
 from .timeline import render_timeline
 
@@ -83,6 +83,28 @@ def get_session_stats(days: int = 1) -> str:
     events = store.iter_events(files=files)
     stats = compute_stats(events)
     return json.dumps(stats, indent=2)
+
+
+@mcp.tool()
+def get_model_stats(model: Optional[str] = None, days: int = 7) -> str:
+    """
+    Get empirical performance metrics, tool failure rates, and detected operational traps broken down by model.
+    Enables self-diagnosis and empirical adaptation per model family.
+    
+    Args:
+        model: Optional filter for a specific model (e.g. 'gemini-3.7-flash', 'claude-3.7-sonnet'). If omitted, breaks down all active models.
+        days: Number of recent days of trace logs to analyze (default 7).
+    """
+    files = store.list_trace_files(days=days)
+    events = store.iter_events(files=files)
+    breakdown = compute_model_breakdown(events)
+    
+    if model:
+        q = model.strip().lower()
+        matched = {m: info for m, info in breakdown.get("models", {}).items() if q in m.lower()}
+        return json.dumps({"query": model, "matches": matched}, indent=2)
+        
+    return json.dumps(breakdown, indent=2)
 
 
 @mcp.tool()

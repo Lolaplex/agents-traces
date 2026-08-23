@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore", message=".*Field 'lifespan' has an incomplete 
 from . import __version__
 from .cli_help import emit_help_json
 from .models import TraceEvent
-from .stats import compute_stats, format_stats_text
+from .stats import compute_model_breakdown, compute_stats, format_model_breakdown_text, format_stats_text
 from .store import TraceStore
 from .sync import merge_agent_mcp, sync_skills
 from .timeline import render_timeline
@@ -54,6 +54,15 @@ def cmd_stats(args: argparse.Namespace, store: TraceStore) -> None:
         label = f"Heute ({datetime.now(timezone.utc).strftime('%Y-%m-%d')})"
 
     events = store.iter_events(files=files)
+
+    if getattr(args, "by_model", False) or getattr(args, "command", "") == "analyze-models":
+        model_data = compute_model_breakdown(events)
+        if getattr(args, "json", False):
+            print(json.dumps(model_data, indent=2))
+        else:
+            print(format_model_breakdown_text(model_data, label=label))
+        return
+
     stats = compute_stats(events)
 
     if getattr(args, "json", False):
@@ -200,7 +209,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats = subparsers.add_parser("stats", help="Display token, cost and tool statistics")
     p_stats.add_argument("--date", help="Specific date YYYY-MM-DD")
     p_stats.add_argument("--days", type=int, help="Number of past days to aggregate")
+    p_stats.add_argument("--by-model", action="store_true", help="Break down statistics and failure rates by model")
     p_stats.add_argument("--json", action="store_true", help="Output raw JSON")
+
+    # analyze-models
+    p_models = subparsers.add_parser("analyze-models", help="Analyze tool failure rates and empirical traps by model")
+    p_models.add_argument("--days", type=int, default=7, help="Days to aggregate (default 7)")
+    p_models.add_argument("--json", action="store_true", help="Output raw JSON")
 
     # inspect
     p_inspect = subparsers.add_parser("inspect", help="Inspect timeline for a session")
@@ -287,6 +302,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     elif args.command == "stats":
+        cmd_stats(args, store)
+        return 0
+    elif args.command == "analyze-models":
         cmd_stats(args, store)
         return 0
     elif args.command == "inspect":
