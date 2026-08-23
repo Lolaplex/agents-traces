@@ -15,7 +15,7 @@ Sub-millisecond event streaming, cost/token metrics, and autonomous error self-h
 
 ## Quickstart
 
-### 1. 1-Step Setup (PyPI)
+### 1-Step Setup
 
 ```bash
 pip install agents-traces && agents-traces init
@@ -30,13 +30,7 @@ Scaffolds `~/.agents/traces/`, autowires MCP configurations into your installed 
 > Simply tell your coding agent: **"Install and set up agents-traces for me."**  
 > The agent installs the package, runs `agents-traces init`, and automatically diagnoses tool failures using `get_recent_errors`.
 
-### 3. Source Checkout via vand
-
-If you manage multi-repo checkouts with [vand](https://github.com/Lolaplex/vand), `agents-traces` includes declarative lifecycle hooks in `source.yml`:
-
-```bash
-vand clone Lolaplex/agents-traces
-```
+*Source checkouts can also be installed and managed using [vand](https://github.com/Lolaplex/vand).*
 
 ---
 
