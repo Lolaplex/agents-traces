@@ -36,6 +36,8 @@ htmlcov/
 # Local Agent Runtimes & Injects
 .agents/
 .cursor/
+.env
+*.log
 
 # IDE & OS
 .DS_Store
