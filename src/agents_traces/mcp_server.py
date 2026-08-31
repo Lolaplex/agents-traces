@@ -174,3 +174,24 @@ def ingest_traces() -> str:
     from .ingest import ingest_all_ide_transcripts
     res = ingest_all_ide_transcripts(store=store)
     return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def session_snap(limit: int = 20) -> str:
+    """Recent user messages from the traces store (live MCP + ingested vendor chats)."""
+    from .session_view import session_snap as view_snap
+    return view_snap(limit=limit, store=store)
+
+
+@mcp.tool()
+def session_grep(pattern: str, since: str = "") -> str:
+    """Search ingested and live session messages in traces (not markdown memory)."""
+    from .session_view import session_grep as view_grep
+    return view_grep(pattern=pattern, since=since, store=store)
+
+
+@mcp.tool()
+def session_tail(session_id: str = "", limit: int = 10) -> str:
+    """Tail recent session messages from traces for one session id or the latest lines."""
+    from .session_view import session_tail as view_tail
+    return view_tail(session_id=session_id, limit=limit, store=store)

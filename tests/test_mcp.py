@@ -41,3 +41,18 @@ def test_mcp_tools(monkeypatch):
         stats = json.loads(stats_str)
         assert stats["tool_calls_total"] == 1
         assert stats["tool_calls_error"] == 1
+
+        fake_store.append(
+            TraceEvent(
+                session="s-mcp",
+                type="message",
+                origin="ingested",
+                metadata={"source": "cursor", "role": "user", "content": "hello traces"},
+            )
+        )
+        snap = mcp_mod.session_snap(limit=5)
+        assert "hello traces" in snap
+        grep = mcp_mod.session_grep("hello traces")
+        assert "hello traces" in grep
+        tail = mcp_mod.session_tail(session_id="s-mcp", limit=5)
+        assert "Session" in tail

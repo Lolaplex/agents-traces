@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import json
 import os
 import shutil
 from datetime import date, datetime, timedelta, timezone
@@ -161,6 +162,39 @@ class TraceStore:
         # Sort by last_ts descending
         results.sort(key=lambda x: x["last_ts"], reverse=True)
         return results[:limit]
+
+    def drop_sessions(self, sessions: Set[str]) -> int:
+        """Rewrite daily files without these session ids. Used to drop ingested
+        twins of live tool logs — not a general mutate path."""
+        if not sessions:
+            return 0
+        dropped = 0
+        for path in self.list_trace_files():
+            try:
+                raw = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            kept: list[str] = []
+            changed = False
+            for line in raw.splitlines(True):
+                if not line.strip():
+                    kept.append(line)
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    kept.append(line)
+                    continue
+                if obj.get("session") in sessions:
+                    dropped += 1
+                    changed = True
+                    continue
+                kept.append(line)
+            if changed:
+                tmp = path.with_suffix(".jsonl.tmp")
+                tmp.write_text("".join(kept), encoding="utf-8")
+                tmp.replace(path)
+        return dropped
 
     def cleanup_old_traces(self, keep_days: int = 30, compress: bool = False) -> int:
         """Delete or compress trace files older than keep_days. Returns count of affected files."""

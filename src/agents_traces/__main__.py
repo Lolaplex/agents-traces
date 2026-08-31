@@ -1,6 +1,6 @@
 """
 CLI entry point for agents-trace.
-Commands: init, stats, inspect, sessions, tail, record, cleanup, serve, skills, sync-mcp
+Commands: init, stats, inspect, sessions, tail, record, assemble, cleanup, ingest, serve, skills, sync-mcp
 """
 
 from __future__ import annotations
@@ -186,7 +186,7 @@ def cmd_cleanup(args: argparse.Namespace, store: TraceStore) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agents-traces",
-        description="Ultra-fast, zero-bloat local JSONL observability and tracing for AI coding agents.",
+        description="Append-only JSONL session traces and per-request assemble.",
     )
     parser.add_argument(
         "-v",
@@ -250,6 +250,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_cleanup = subparsers.add_parser("cleanup", help="Delete or compress old traces")
     p_cleanup.add_argument("--keep-days", type=int, default=30, help="Days to retain (default 30)")
     p_cleanup.add_argument("--compress", action="store_true", help="Gzip instead of deleting")
+
+    # assemble (agent = trace, per-request reconstruct)
+    p_assemble = subparsers.add_parser(
+        "assemble",
+        help="Rebuild chat-completions messages from a session trace",
+    )
+    p_assemble.add_argument("--session", required=True, help="Session id (ses_… or legacy channel-user)")
+    p_assemble.add_argument("--limit", type=int, default=24, help="Max turns")
+    p_assemble.add_argument("--days", type=int, default=30, help="Trace files to scan")
+    p_assemble.add_argument("--include-tools", action="store_true")
 
     # ingest
     subparsers.add_parser("ingest", help="Ingest IDE transcripts (Antigravity / Cursor) into traces")
@@ -322,13 +332,37 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "cleanup":
         cmd_cleanup(args, store)
         return 0
+    elif args.command == "assemble":
+        from .assemble import assemble_messages
+
+        msgs = assemble_messages(
+            args.session,
+            store=store,
+            limit=args.limit,
+            days=args.days,
+            include_tools=args.include_tools,
+        )
+        print(json.dumps({"session": args.session, "messages": msgs}, ensure_ascii=False, indent=2))
+        return 0
     elif args.command == "ingest":
         from .ingest import ingest_all_ide_transcripts
         res = ingest_all_ide_transcripts(store=store)
         print(f"\033[1;36m=== Ingested {res['total_events']:,} trace events across {res['total_sessions']} IDE sessions ===\033[0m")
         print(f"• Antigravity: {res['antigravity_events']:,} events")
+        print(f"• Cursor:      {res.get('cursor_events', 0):,} events")
         print(f"• Claude:      {res['claude_events']:,} events")
         print(f"• Cline/Tasks: {res['cline_events']:,} events")
+        skipped = res.get("skipped_sessions", 0)
+        if skipped:
+            print(f"• Skipped:     {skipped} sessions already in traces")
+        twins = res.get("skipped_live_twins", 0)
+        purged_s = res.get("purged_twin_sessions", 0)
+        purged_e = res.get("purged_twin_events", 0)
+        if twins or purged_s:
+            print(
+                f"• Live twins:  skipped {twins} ingest sessions; "
+                f"dropped {purged_e} events in {purged_s} already-written sessions"
+            )
         return 0
     elif args.command in ["serve", "mcp"]:
         from .mcp_server import mcp

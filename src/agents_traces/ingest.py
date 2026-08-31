@@ -17,12 +17,179 @@ import os
 import re
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
 from .models import TraceEvent
 from .store import TraceStore
+
+_TS_TAG = re.compile(
+    r"<timestamp>\s*(.*?)\s*</timestamp>",
+    re.I | re.S,
+)
+_TS_CLOCK = re.compile(
+    r"(\w+),\s+(\w+)\s+(\d+),\s+(\d+),\s+(\d+):(\d+)\s*(AM|PM)\s*\(UTC([+-]\d+)(?::(\d+))?\)",
+    re.I,
+)
+_MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+
+
+def _parse_cursor_clock(raw: str) -> Optional[str]:
+    """Parse Cursor chat_selection clocks into ISO UTC. No timestamp on jsonl rows."""
+    m = _TS_CLOCK.search(raw.replace("\n", " "))
+    if not m:
+        return None
+    month = _MONTHS.get(m.group(2)[:3].lower())
+    if not month:
+        return None
+    day = int(m.group(3))
+    year = int(m.group(4))
+    hour = int(m.group(5))
+    minute = int(m.group(6))
+    ampm = m.group(7).upper()
+    if ampm == "PM" and hour != 12:
+        hour += 12
+    if ampm == "AM" and hour == 12:
+        hour = 0
+    offset_h = int(m.group(8))
+    offset_m = int(m.group(9) or 0)
+    tz = timezone(timedelta(hours=offset_h, minutes=offset_m if offset_h >= 0 else -offset_m))
+    dt = datetime(year, month, day, hour, minute, tzinfo=tz)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _cursor_text_blob(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    bits: list[str] = []
+    for part in content:
+        if isinstance(part, dict) and part.get("type") == "text":
+            bits.append(str(part.get("text") or ""))
+    return "\n".join(bits)
+
+
+def _unwrap_mcp_tool(name: str, inp: dict) -> tuple[str, dict]:
+    if name in ("CallMcpTool", "call_mcp_tool"):
+        inner = inp.get("arguments") or inp.get("Arguments") or {}
+        if isinstance(inner, str):
+            try:
+                inner = json.loads(inner)
+            except json.JSONDecodeError:
+                inner = {"_raw": inner}
+        if not isinstance(inner, dict):
+            inner = {"value": inner}
+        tool = str(inp.get("toolName") or inp.get("ToolName") or name)
+        return tool, inner
+    return name, inp
+
+
+def _existing_sessions(store: TraceStore) -> set[str]:
+    seen: set[str] = set()
+    for event in store.iter_events():
+        if event.session:
+            seen.add(event.session)
+    return seen
+
+
+def _canon_arg(event: TraceEvent) -> Optional[str]:
+    """Identity for a tool call: the verb plus the argument that is the payload.
+
+    Extra keys (project, limit) differ between live MCP and product jsonl;
+    they must not create a second copy of the same write or search.
+    """
+    if event.type != "tool_call" or not event.tool:
+        return None
+    args = event.args if isinstance(event.args, dict) else {}
+    tool = event.tool
+    if tool in ("search_memory", "search_hybrid"):
+        q = re.sub(r"\s+", " ", str(args.get("query") or "")).strip().lower()
+        return f"search|{q}" if len(q) > 8 else None
+    if tool == "add_memory":
+        body = re.sub(
+            r"\s+",
+            " ",
+            str(args.get("fact_or_message") or args.get("content") or ""),
+        ).strip().lower()
+        return f"write|{body}" if len(body) > 20 else None
+    if tool == "write_memory_file":
+        fid = str(args.get("file_id") or "").strip()
+        return f"wfile|{fid.lower()}" if fid else None
+    body = json.dumps(args, sort_keys=True, default=str, ensure_ascii=False)
+    return f"{tool}|{body}"
+
+
+def _tool_fingerprint(event: TraceEvent) -> Optional[str]:
+    return _canon_arg(event)
+
+
+def _live_tool_fingerprints(store: TraceStore) -> set[str]:
+    fps: set[str] = set()
+    for event in store.iter_events():
+        if event.origin != "live":
+            continue
+        fp = _tool_fingerprint(event)
+        if fp:
+            fps.add(fp)
+    return fps
+
+
+def tool_calls_already_live(events: list[TraceEvent], live_fps: set[str]) -> bool:
+    """True when this ingested session's tools are already on a live session.
+
+    Live interceptor and product-jsonl ingest are two pipes for the same work.
+    Conversation bodies stay in the product folder; traces keep one copy.
+    """
+    fps = []
+    for event in events:
+        fp = _tool_fingerprint(event)
+        if fp:
+            fps.append(fp)
+    if not fps:
+        return False
+    unique = set(fps)
+    hits = unique & live_fps
+    if not hits:
+        return False
+    if hits == unique:
+        return True
+    return len(hits) >= 2 and (len(hits) / len(unique)) >= 0.5
+
+
+def ingested_sessions_shadowed_by_live(store: TraceStore) -> set[str]:
+    live_fps = _live_tool_fingerprints(store)
+    if not live_fps:
+        return set()
+    by_sid: dict[str, list[TraceEvent]] = {}
+    origins: dict[str, set[str]] = {}
+    for event in store.iter_events():
+        sid = event.session
+        if not sid:
+            continue
+        by_sid.setdefault(sid, []).append(event)
+        origins.setdefault(sid, set()).add(event.origin or "unknown")
+    drop: set[str] = set()
+    for sid, evs in by_sid.items():
+        if "live" in origins.get(sid, ()):
+            continue
+        if tool_calls_already_live(evs, live_fps):
+            drop.add(sid)
+    return drop
 
 
 def _expand(raw_path: str) -> Path:
@@ -256,56 +423,174 @@ def parse_cline_task(path: Path) -> Generator[TraceEvent, None, None]:
 
 
 # ============================================================================
-# 4. Master Ingester
+# 4. Cursor agent-transcripts
+# ============================================================================
+def discover_cursor_transcripts() -> List[Path]:
+    root = Path.home() / ".cursor" / "projects"
+    if not root.is_dir():
+        return []
+    best: dict[str, Path] = {}
+    for path in root.rglob("*.jsonl"):
+        if "agent-transcripts" not in path.parts:
+            continue
+        if "subagents" in path.parts:
+            continue
+        uid = path.parent.name
+        prev = best.get(uid)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if prev is None or mtime > prev.stat().st_mtime:
+            best[uid] = path
+    return list(best.values())
+
+
+def parse_cursor_transcript(path: Path) -> Generator[TraceEvent, None, None]:
+# Cursor copies the same conversation uuid under every workspace folder.
+# Ingest once, newest file wins. Session id is cursor-<uuid>.
+    sid = f"cursor-{path.parent.name}"
+    fallback = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    ts = fallback.strftime("%Y-%m-%dT%H:%M:%SZ")
+    started = False
+    try:
+        fh = path.open(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            role = obj.get("role")
+            msg = obj.get("message") or {}
+            content = msg.get("content")
+            blob = _cursor_text_blob(content)
+            clock = _parse_cursor_clock(blob)
+            if not clock:
+                tag = _TS_TAG.search(blob)
+                if tag:
+                    clock = _parse_cursor_clock(tag.group(1))
+            if clock:
+                ts = clock
+            if role == "user" and blob.strip():
+                query = blob
+                m = re.search(r"<user_query>\s*(.*?)\s*</user_query>", blob, re.S)
+                if m:
+                    query = m.group(1)
+                query = query.strip()[:2000]
+                if not started:
+                    started = True
+                    yield TraceEvent(
+                        ts=ts,
+                        session=sid,
+                        type="session_start",
+                        origin="ingested",
+                        metadata={"source": "cursor", "prompt": query[:120], "path": str(path)},
+                    )
+                yield TraceEvent(
+                    ts=ts,
+                    session=sid,
+                    type="message",
+                    origin="ingested",
+                    metadata={"source": "cursor", "role": "user", "content": query},
+                )
+                continue
+            if role != "assistant" or not isinstance(content, list):
+                continue
+            texts = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                ptype = part.get("type")
+                if ptype == "text" and part.get("text"):
+                    texts.append(str(part.get("text"))[:2000])
+                elif ptype == "tool_use":
+                    raw_name = str(part.get("name") or "tool")
+                    inp = part.get("input") if isinstance(part.get("input"), dict) else {}
+                    tool, args = _unwrap_mcp_tool(raw_name, inp)
+                    yield TraceEvent(
+                        ts=ts,
+                        session=sid,
+                        type="tool_call",
+                        origin="ingested",
+                        tool=tool,
+                        args=args,
+                        status="ok",
+                        metadata={"source": "cursor", "mcp_wrapper": raw_name},
+                    )
+            if texts:
+                yield TraceEvent(
+                    ts=ts,
+                    session=sid,
+                    type="message",
+                    origin="ingested",
+                    metadata={"source": "cursor", "role": "assistant", "content": texts[0]},
+                )
+
+
+# ============================================================================
+# 5. Master Ingester
 # ============================================================================
 def ingest_all_ide_transcripts(store: Optional[TraceStore] = None) -> Dict[str, Any]:
     """
     Ingest all available IDE conversations (Antigravity, Claude, Cursor, Cline)
     into unified daily trace files ~/.agents/traces/YYYY-MM-DD.jsonl.
+    Sessions already present are skipped (re-ingest is not a second copy).
+    Cursor/Antigravity jsonl that duplicates live MCP tool calls is skipped
+    (and dropped if already written): one session in traces, bodies stay in
+    the product folder.
     """
     target_store = store or TraceStore()
-    stats: Dict[str, int] = {
+    twins = ingested_sessions_shadowed_by_live(target_store)
+    purged = target_store.drop_sessions(twins) if twins else 0
+    known = _existing_sessions(target_store)
+    live_fps = _live_tool_fingerprints(target_store)
+    stats: Dict[str, Any] = {
         "antigravity_events": 0,
         "claude_events": 0,
         "cline_events": 0,
+        "cursor_events": 0,
+        "skipped_sessions": 0,
+        "skipped_live_twins": 0,
+        "purged_twin_events": purged,
+        "purged_twin_sessions": len(twins),
         "total_events": 0,
         "total_sessions": 0,
     }
 
-    # 1. Antigravity
-    agy_files = discover_antigravity_transcripts()
-    for f in agy_files:
-        count = 0
-        for event in parse_antigravity_transcript(f):
-            target_store.append(event)
-            count += 1
-        stats["antigravity_events"] += count
-        if count > 0:
+    def _ingest(files, parser, key: str) -> None:
+        for f in files:
+            events = list(parser(f))
+            if not events:
+                continue
+            sid = events[0].session
+            if sid in known:
+                stats["skipped_sessions"] += 1
+                continue
+            if tool_calls_already_live(events, live_fps):
+                stats["skipped_live_twins"] += 1
+                known.add(sid)
+                continue
+            for event in events:
+                target_store.append(event)
+            stats[key] += len(events)
             stats["total_sessions"] += 1
+            known.add(sid)
 
-    # 2. Claude
-    claude_files = discover_claude_transcripts()
-    for f in claude_files:
-        count = 0
-        for event in parse_claude_transcript(f):
-            target_store.append(event)
-            count += 1
-        stats["claude_events"] += count
-        if count > 0:
-            stats["total_sessions"] += 1
-
-    # 3. Cline / Roo-Cline
-    cline_files = discover_cline_tasks()
-    for f in cline_files:
-        count = 0
-        for event in parse_cline_task(f):
-            target_store.append(event)
-            count += 1
-        stats["cline_events"] += count
-        if count > 0:
-            stats["total_sessions"] += 1
+    _ingest(discover_antigravity_transcripts(), parse_antigravity_transcript, "antigravity_events")
+    _ingest(discover_claude_transcripts(), parse_claude_transcript, "claude_events")
+    _ingest(discover_cline_tasks(), parse_cline_task, "cline_events")
+    _ingest(discover_cursor_transcripts(), parse_cursor_transcript, "cursor_events")
 
     stats["total_events"] = (
-        stats["antigravity_events"] + stats["claude_events"] + stats["cline_events"]
+        stats["antigravity_events"]
+        + stats["claude_events"]
+        + stats["cline_events"]
+        + stats["cursor_events"]
     )
     return stats
