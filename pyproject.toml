@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agents-traces"
 version = "0.42.0"
-description = "Ultra-fast, zero-bloat local JSONL observability and tracing for AI coding agents via CLI and MCP"
+description = "Append-only JSONL session traces, assemble, and MCP inspect tools"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

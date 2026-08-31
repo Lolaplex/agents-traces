@@ -8,8 +8,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License"></a>
 </p>
 
-**Ultra-fast, zero-bloat local JSONL observability and tracing for AI coding agents.**  
-Sub-millisecond event streaming, cost/token metrics, and autonomous error self-healing. Shared across **Cursor**, **Claude Code**, **Antigravity**, and **Zed**.
+**Append-only JSONL session traces. Assemble rebuilds the chat payload for one request.**  
+Cost/token metrics and session inspect tools. Shared across **Cursor**, **Claude Code**, **Antigravity**, and **Zed**.
 
 ---
 
