@@ -5,9 +5,14 @@ on:
     types: [published]
   workflow_dispatch:
 
+concurrency:
+  group: publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       id-token: write
       contents: read
@@ -30,6 +35,7 @@ jobs:
           python scripts/sync_bundled.py --check || python scripts/sync_bundled.py
 
       - name: Run test suite
+        timeout-minutes: 10
         run: |
           pip install -e .
           python -m pytest
@@ -40,3 +46,37 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  notify:
+    name: Discord
+    needs: [build-and-publish]
+    if: ${{ failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Post failure to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL unset; skip"
+            exit 0
+          fi
+          python3 <<'PY'
+          import json, os, urllib.request
+          repo = os.environ["GITHUB_REPOSITORY"]
+          wf = os.environ["GITHUB_WORKFLOW"]
+          ref = os.environ["GITHUB_REF_NAME"]
+          url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/{repo}"
+              f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+          )
+          payload = {"content": f"**{repo}** `{wf}` failed on `{ref}`\n{url}"}
+          req = urllib.request.Request(
+              os.environ["DISCORD_WEBHOOK_URL"],
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          urllib.request.urlopen(req, timeout=15).read()
+          PY
