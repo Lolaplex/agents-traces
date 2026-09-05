@@ -294,6 +294,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     args = parser.parse_args(argv)
+    if args.command not in ("serve", "mcp"):
+        try:
+            from .updates import check_for_updates
+            check_for_updates("agents-traces", __version__)
+        except Exception:
+            pass
+
     store = TraceStore()
 
     if args.command == "init":
