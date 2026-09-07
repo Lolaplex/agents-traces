@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from agents_traces.prompt import PromptParts, clock_message, render_system_prompt, stamp_content
 
 
@@ -32,6 +34,34 @@ def test_clock_is_a_separate_message():
     msg = clock_message()
     assert msg["role"] == "system"
     assert msg["content"].startswith("<clock")
+
+
+def test_clock_converts_berlin_with_weekday():
+    utc = datetime(2026, 9, 7, 15, 20, tzinfo=timezone.utc)
+    msg = clock_message(utc, timezone_name="Europe/Berlin")
+    assert msg["role"] == "system"
+    assert 'timezone="Europe/Berlin"' in msg["content"]
+    assert "Monday" in msg["content"]
+    assert "17:20:00" in msg["content"]
+    assert "+02:00" in msg["content"]
+    assert "+00:00" not in msg["content"]
+
+
+def test_clock_converts_tokyo_crosses_date():
+    utc = datetime(2026, 9, 7, 15, 20, tzinfo=timezone.utc)
+    msg = clock_message(utc, timezone_name="Asia/Tokyo")
+    assert 'timezone="Asia/Tokyo"' in msg["content"]
+    assert "Tuesday" in msg["content"]
+    assert "00:20:00" in msg["content"]
+    assert "+09:00" in msg["content"]
+
+
+def test_clock_invalid_tz_falls_back_utc():
+    utc = datetime(2026, 9, 7, 15, 20, tzinfo=timezone.utc)
+    msg = clock_message(utc, timezone_name="Not/AZone")
+    assert 'timezone="UTC"' in msg["content"]
+    assert "Monday" in msg["content"]
+    assert "15:20:00" in msg["content"]
 
 
 def test_stamp_is_idempotent():
