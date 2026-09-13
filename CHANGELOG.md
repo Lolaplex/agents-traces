@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- CI runs only on pull requests to `dev`/`main` and on manual dispatch, not on branch pushes or GitHub release events.
+
+### Removed
+- Automatic package publishing and GitHub Release creation from Actions (no PyPI upload, no tag-triggered release).
+
 ### Fixed
 - Per-turn clock converts into the caller's IANA timezone and includes weekday plus local offset, so models no longer see a UTC stamp labeled as another zone.
 
