@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- CI runs only on pull requests to `main`.
 - CI runs only on pull requests to `dev`/`main` and on manual dispatch, not on branch pushes or GitHub release events.
 
 ### Removed
