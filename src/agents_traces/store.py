@@ -105,6 +105,38 @@ class TraceStore:
                 return event.session
         return None
 
+    def find_latest_session(
+        self,
+        *,
+        channel: str = "",
+        user: str = "",
+        project: str = "",
+        alias: str = "",
+        days: int = 90,
+    ) -> Optional[str]:
+        """Resume thread from traces: newest session matching channel/user/project."""
+        last_ts_by_session: dict[str, str] = {}
+        for event in self.iter_events(files=self.list_trace_files(days=days)):
+            if not event.session:
+                continue
+            md = event.metadata if isinstance(event.metadata, dict) else {}
+            if channel and str(md.get("channel") or "") != channel:
+                continue
+            if user and str(md.get("user") or "") != str(user):
+                continue
+            if project and str(md.get("project") or "") != project:
+                continue
+            if alias:
+                ev_alias = str(md.get("alias") or "")
+                if ev_alias and ev_alias != alias:
+                    continue
+            prev = last_ts_by_session.get(event.session, "")
+            if event.ts >= prev:
+                last_ts_by_session[event.session] = event.ts
+        if not last_ts_by_session:
+            return None
+        return max(last_ts_by_session.items(), key=lambda item: item[1])[0]
+
     def get_recent_errors(self, limit: int = 10, session_id: Optional[str] = None) -> List[TraceEvent]:
         """Get the most recent N errors (newest first)."""
         errors: List[TraceEvent] = []

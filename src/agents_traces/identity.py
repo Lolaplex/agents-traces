@@ -1,11 +1,12 @@
 """Person vs thread vs channel handle.
 
-An alias is how a device names you (`telegram:5712`, `http:fabian`).
-A user is the person those aliases resolve to.
-A session is a conversation thread the person can resume from any device.
+An alias is how a device names you (`telegram:5712`, `repl:local`).
+A user is the person those aliases resolve to (stable `u_…` until DID binds).
+A session is a conversation thread (`ses_…`) — **resume from traces**, not identity.
 
-DID / plex-net later. This file is the local directory (`~/.agents/identity.json`).
-Conversation bodies stay in traces; this map is not markdown memory.
+Human profile (name, work, prefs) lives in `~/.agents/memory/USER.md`.
+Crypto identity lives in `~/.agents/keys/` (`did:key`).
+This file is alias bindings only (`~/.agents/identity.json`).
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
+
 
 def default_identity_path() -> Path:
     override = os.environ.get("AGENTS_IDENTITY_PATH", "").strip()
@@ -63,23 +65,14 @@ def today_utc() -> str:
 @dataclass
 class UserRecord:
     id: str
-    display: str = ""
-    work: str = ""
-    project: str = ""
-    timezone: str = ""
     aliases: list[str] = field(default_factory=list)
-    active_session: str = ""
+    did: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "display": self.display,
-            "work": self.work,
-            "project": self.project,
-            "timezone": self.timezone,
-            "aliases": list(self.aliases),
-            "active_session": self.active_session,
-        }
+        out: dict[str, Any] = {"id": self.id, "aliases": list(self.aliases)}
+        if self.did:
+            out["did"] = self.did
+        return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "UserRecord":
@@ -88,12 +81,8 @@ class UserRecord:
             aliases = []
         return cls(
             id=str(data["id"]),
-            display=str(data.get("display") or ""),
-            work=str(data.get("work") or ""),
-            project=str(data.get("project") or ""),
-            timezone=str(data.get("timezone") or ""),
             aliases=[str(a) for a in aliases],
-            active_session=str(data.get("active_session") or ""),
+            did=str(data.get("did") or ""),
         )
 
 
@@ -134,13 +123,11 @@ class IdentityStore:
     def __init__(self, path: Path | str | None = None):
         self.path = Path(path) if path else default_identity_path()
         self._users: dict[str, UserRecord] = {}
-        self._sessions: dict[str, SessionRecord] = {}
         self._loaded = False
 
     def load(self) -> None:
         self._loaded = True
         self._users = {}
-        self._sessions = {}
         if not self.path.exists():
             return
         try:
@@ -155,12 +142,6 @@ class IdentityStore:
                 if isinstance(row, dict):
                     rec = UserRecord.from_dict({**row, "id": row.get("id") or key})
                     self._users[rec.id] = rec
-        sessions = data.get("sessions") or {}
-        if isinstance(sessions, dict):
-            for key, row in sessions.items():
-                if isinstance(row, dict):
-                    rec = SessionRecord.from_dict({**row, "id": row.get("id") or key})
-                    self._sessions[rec.id] = rec
 
     def _ensure(self) -> None:
         if not self._loaded:
@@ -169,10 +150,7 @@ class IdentityStore:
     def save(self) -> None:
         self._ensure()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "users": {u.id: u.to_dict() for u in self._users.values()},
-            "sessions": {s.id: s.to_dict() for s in self._sessions.values()},
-        }
+        payload = {"users": {u.id: u.to_dict() for u in self._users.values()}}
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         os.replace(tmp, self.path)
@@ -188,10 +166,6 @@ class IdentityStore:
         self._ensure()
         return self._users.get(user_id)
 
-    def get_session(self, session_id: str) -> Optional[SessionRecord]:
-        self._ensure()
-        return self._sessions.get(session_id)
-
     def bind_alias(self, user_id: str, alias: str) -> UserRecord:
         self._ensure()
         user = self._users.get(user_id)
@@ -202,65 +176,69 @@ class IdentityStore:
             self.save()
         return user
 
-    def _new_session(self, user: UserRecord, *, start_date: str | None = None) -> SessionRecord:
+    def _mint_session(self, user: UserRecord) -> SessionRecord:
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        rec = SessionRecord(
+        return SessionRecord(
             id=mint_session_id(),
             user=user.id,
-            start_date=start_date or today_utc(),
+            start_date=today_utc(),
             created_at=now,
         )
-        self._sessions[rec.id] = rec
-        user.active_session = rec.id
-        return rec
 
-    def _ensure_user(
-        self,
-        *,
-        alias: str,
-        user_id: str = "",
-        display: str = "",
-        work: str = "",
-        project: str = "",
-    ) -> UserRecord:
+    def _ensure_user(self, *, alias: str, user_id: str = "", did: str = "") -> UserRecord:
         self._ensure()
         if user_id:
             user = self._users.get(user_id)
             if user is None:
-                user = UserRecord(
-                    id=user_id,
-                    display=display,
-                    work=work,
-                    project=project,
-                    aliases=[alias] if alias else [],
-                )
+                user = UserRecord(id=user_id, aliases=[alias] if alias else [], did=did)
                 self._users[user.id] = user
-            elif alias:
-                if alias not in user.aliases:
-                    user.aliases.append(alias)
-            if display and not user.display:
-                user.display = display
-            if work and not user.work:
-                user.work = work
-            if project:
-                user.project = project
+            elif alias and alias not in user.aliases:
+                user.aliases.append(alias)
+            if did and not user.did:
+                user.did = did
             return user
         if alias:
             found = self.find_by_alias(alias)
             if found:
-                if project:
-                    found.project = project
                 return found
         uid = mint_user_id()
-        user = UserRecord(
-            id=uid,
-            display=display,
-            work=work,
-            project=project,
-            aliases=[alias] if alias else [],
-        )
+        user = UserRecord(id=uid, aliases=[alias] if alias else [], did=did)
         self._users[uid] = user
         return user
+
+    def _session_from_traces(
+        self,
+        *,
+        channel: str,
+        user: str | int,
+        project: str,
+        alias: str,
+        trace_lookup: Optional[Callable[..., Optional[str]]] = None,
+    ) -> Optional[SessionRecord]:
+        if trace_lookup is None:
+            try:
+                from .store import TraceStore
+
+                trace_lookup = TraceStore().find_latest_session
+            except ImportError:
+                return None
+        sid = trace_lookup(channel=channel, user=str(user), project=project, alias=alias)
+        if not sid:
+            return None
+        return SessionRecord(id=sid, user="", start_date=today_utc(), created_at="")
+
+    def _user_id_from_traces(self, session_id: str) -> str:
+        try:
+            from .store import TraceStore
+
+            for event in TraceStore().iter_events(session_id=session_id):
+                md = event.metadata if isinstance(event.metadata, dict) else {}
+                uid = md.get("user_id")
+                if uid:
+                    return str(uid)
+        except ImportError:
+            pass
+        return ""
 
     def resolve(
         self,
@@ -270,88 +248,71 @@ class IdentityStore:
         user_id: str = "",
         session: str = "",
         new_session: bool = False,
-        display: str = "",
-        work: str = "",
         project: str = "",
         legacy_exists: Optional[Callable[[str], bool]] = None,
+        trace_lookup: Optional[Callable[..., Optional[str]]] = None,
     ) -> Resolved:
-        """Map a channel handle (and optional session/user_id) onto one person + thread."""
+        """Map channel handle (+ optional session) onto one person + thread."""
         alias = alias_id(channel, user) if (channel and str(user).strip()) else ""
         if not alias and not user_id and not session:
             raise ValueError("channel+user, user_id, or session is required")
 
         self._ensure()
-        legacy = False
 
         if session and session.lower() not in ("new", "new_session"):
-            rec = self._sessions.get(session)
-            if rec is None:
-                rec = SessionRecord(
-                    id=session,
-                    user="",
-                    start_date=today_utc(),
-                    created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                )
-                self._sessions[session] = rec
-            person = None
-            if rec.user:
-                person = self._users.get(rec.user)
-            if person is None:
-                person = self._ensure_user(
-                    alias=alias,
-                    user_id=user_id or rec.user,
-                    display=display,
-                    work=work,
-                    project=project,
-                )
-                rec.user = person.id
-            elif alias:
-                if alias not in person.aliases:
-                    person.aliases.append(alias)
-            if project:
-                person.project = project
-            person.active_session = rec.id
+            trace_uid = self._user_id_from_traces(session)
+            person = self._ensure_user(alias=alias, user_id=user_id or trace_uid)
+            rec = SessionRecord(
+                id=session,
+                user=person.id,
+                start_date=today_utc(),
+                created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            )
+            if alias and alias not in person.aliases:
+                person.aliases.append(alias)
             self.save()
-            return Resolved(user=person, session=rec, alias=alias, legacy=not rec.id.startswith("ses_"))
+            return Resolved(
+                user=person,
+                session=rec,
+                alias=alias,
+                legacy=not rec.id.startswith("ses_"),
+            )
 
-        person = self._ensure_user(
-            alias=alias,
-            user_id=user_id,
-            display=display,
-            work=work,
-            project=project,
-        )
+        person = self._ensure_user(alias=alias, user_id=user_id)
 
         if new_session or session.lower() in ("new", "new_session"):
-            rec = self._new_session(person)
+            rec = self._mint_session(person)
             self.save()
             return Resolved(user=person, session=rec, alias=alias)
 
-        if person.active_session and person.active_session in self._sessions:
-            rec = self._sessions[person.active_session]
+        traced = self._session_from_traces(
+            channel=channel,
+            user=user,
+            project=project,
+            alias=alias,
+            trace_lookup=trace_lookup,
+        )
+        if traced is not None:
+            traced.user = person.id
             self.save()
-            return Resolved(user=person, session=rec, alias=alias)
+            return Resolved(
+                user=person,
+                session=traced,
+                alias=alias,
+                legacy=not traced.id.startswith("ses_"),
+            )
 
         if alias and channel and str(user).strip():
             old = legacy_session_id(channel, user)
-            exists = False
-            if legacy_exists is not None:
-                exists = bool(legacy_exists(old))
+            exists = bool(legacy_exists(old)) if legacy_exists is not None else False
             if exists:
-                rec = SessionRecord(
-                    id=old,
-                    user=person.id,
-                    start_date=today_utc(),
-                    created_at="",
-                )
-                self._sessions[old] = rec
-                person.active_session = old
+                rec = SessionRecord(id=old, user=person.id, start_date=today_utc(), created_at="")
                 self.save()
                 return Resolved(user=person, session=rec, alias=alias, legacy=True)
 
-        rec = self._new_session(person)
+        rec = self._mint_session(person)
         self.save()
-        return Resolved(user=person, session=rec, alias=alias, legacy=legacy)
+        return Resolved(user=person, session=rec, alias=alias)
 
 
 def session_has_events(session: str, store: Any | None = None) -> bool:

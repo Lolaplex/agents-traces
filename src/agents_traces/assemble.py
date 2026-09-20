@@ -148,6 +148,7 @@ def record_message(
     channel: str = "",
     user: str = "",
     user_id: str = "",
+    project: str = "",
     binary_refs: Optional[list[dict[str, str]]] = None,
     origin: str = "live",
 ) -> TraceEvent:
@@ -167,6 +168,8 @@ def record_message(
         metadata["user"] = str(user)
     if user_id:
         metadata["user_id"] = user_id
+    if project:
+        metadata["project"] = project
     if binary_refs:
         metadata["binary_refs"] = binary_refs
     event = TraceEvent(
