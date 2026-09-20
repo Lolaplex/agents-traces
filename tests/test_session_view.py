@@ -49,6 +49,9 @@ def test_session_view_reads_messages_not_product_jsonl():
         assert "Session tail" in tail
         assert "pin vand export" in tail
 
+        tail_prefix = session_tail(session_id="trace:cursor-abc", limit=5, store=store)
+        assert "pin vand export" in tail_prefix
+
 
 def test_session_view_empty_store():
     with tempfile.TemporaryDirectory() as tmpdir:

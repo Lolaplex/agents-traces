@@ -34,6 +34,8 @@ def iter_session_lines(
     target = store or TraceStore()
     want_roles = {r.lower() for r in roles} if roles is not None else None
     needle = session_id.strip().lower()
+    if needle.startswith("trace:"):
+        needle = needle[len("trace:") :].strip()
     files = target.list_trace_files(days=days) if days else None
     for event in target.iter_events(files=files):
         if event.type != "message":
@@ -99,17 +101,20 @@ def format_grep(pattern: str, lines: list[dict[str, Any]], since: str = "") -> s
 
 def format_tail(lines: list[dict[str, Any]], session_id: str = "", limit: int = 10) -> str:
     limit = max(1, limit)
-    if session_id:
+    clean_sid = session_id.strip()
+    if clean_sid.startswith("trace:"):
+        clean_sid = clean_sid[len("trace:") :].strip()
+    if clean_sid:
         filtered = [
             item
             for item in lines
-            if session_id.lower() in item["session"].lower()
-            or session_id.lower() in item["title"].lower()
+            if clean_sid.lower() in item["session"].lower()
+            or clean_sid.lower() in item["title"].lower()
         ]
     else:
         filtered = lines
     if not filtered:
-        if session_id:
+        if clean_sid:
             return f"Session tail (0 lines). No session lines found matching '{session_id}'."
         return "Session tail (0 lines). Run `python -m agents_traces ingest`."
     tail = filtered[-limit:]
