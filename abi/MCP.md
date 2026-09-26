@@ -1,31 +1,41 @@
-# MCP Tool Surface Specification
+# MCP surface
 
-The `agents-traces` server exposes the following FastMCP tools for AI coding agents:
+The Python server in this repository (`python -m agents_traces serve`, FastMCP) is the live tool list. The installed command is `agents-traces` (plural).
 
-## 1. `get_last_session_trace`
-- **Description**: Retrieves the full chronological execution trace and formatted timeline of the current or most recent agent session.
-- **Parameters**:
-  - `session_id` (string, optional): Target session ID. If omitted, uses the latest active session.
-  - `limit` (integer, optional): Maximum number of recent events to return (default: 40).
-- **Returns**: Formatted ANSI/text timeline showing tool calls, durations, edits, and error points.
+## Tools
 
-## 2. `get_recent_errors`
-- **Description**: Query recent tool failures and exceptions across sessions.
-- **Parameters**:
-  - `limit` (integer, optional): Number of errors to retrieve (default: 10).
-  - `session_id` (string, optional): Filter by specific session ID.
-- **Returns**: JSON list of error events with tool arguments, error messages, and tracebacks.
+### `get_last_session_trace(session_id=None, limit=40)`
 
-## 3. `get_session_stats`
-- **Description**: Computes aggregated resource usage, token counts, estimated costs, and tool success rates.
-- **Parameters**:
-  - `days` (integer, optional): Number of past days to aggregate (default: 1).
-- **Returns**: JSON object containing session count, tokens in/out, estimated cost, and tool reliability metrics.
+Chronological timeline for one session. Omit `session_id` for the latest. A `trace:` prefix on the id is stripped. Returns the rendered timeline, not raw JSONL.
 
-## 4. `record_trace`
-- **Description**: Ingests an observability trace event into the daily append-only JSONL log.
-- **Parameters**:
-  - `session` (string): Session identifier.
-  - `type` (string): Event type discriminator.
-  - `tool`, `args`, `status`, `error`, `duration_ms`, `model`, `tokens_in`, `tokens_out`, `cost_usd`, `file`, `lines_added`, `lines_removed`, `metadata`.
-- **Returns**: JSON status object confirming recorded event.
+### `get_recent_errors(limit=10, session_id=None)`
+
+Recent failed tool calls: tool, args, error, stack. Optional session filter. Same `trace:` prefix rule.
+
+### `get_session_stats(days=1)`
+
+Tokens, estimated USD, tool success for the last N UTC days. `days=1` is today.
+
+### `get_model_stats(model=None, days=7)`
+
+Same window, grouped by model, including failure rates. `model` is a substring filter. CLI mirror: `agents-traces analyze-models`.
+
+### `record_trace(session, type, tool=None, args=None, status=None, error=None, duration_ms=None, model=None, tokens_in=None, tokens_out=None, cost_usd=None, file=None, lines_added=None, lines_removed=None, metadata=None)`
+
+Append one event to today's JSONL. `type` is `tool_call`, `llm_call`, `file_edit`, `error`, `session_start`, `session_end`, or `custom`.
+
+### `ingest_traces()`
+
+Copy recent IDE transcripts (Antigravity, Cursor, Claude, Cline) into the daily files. Skips sessions already stored.
+
+### `session_snap(limit=20)`
+
+Recent user messages from this store (live MCP events and ingested chats). Not agents-memory.
+
+### `session_grep(pattern, since="")`
+
+Search those messages. `since` is optional.
+
+### `session_tail(session_id="", limit=10)`
+
+Last messages for one session id, or the latest lines when `session_id` is empty.

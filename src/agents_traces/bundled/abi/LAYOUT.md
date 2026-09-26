@@ -20,4 +20,4 @@ The location can be overridden at runtime by setting the `AGENTS_TRACES_DIR` env
 ## Rotation Rules
 - Daily Partitioning: Each UTC day automatically starts a new file named `YYYY-MM-DD.jsonl`.
 - Zero Concurrency Bottleneck: Appends use atomic-like write modes.
-- Cleanup: Old traces can be gzipped to `.jsonl.gz` or deleted using `agents-trace cleanup --keep-days 30`.
+- Cleanup: Old traces can be gzipped to `.jsonl.gz` or deleted using `agents-traces cleanup --keep-days 30`.
