@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-09-26
+
+### Changed
+- README and ABI list the live CLI (`assemble`, `ingest`, `analyze-models`, `record`) and all nine MCP tools. Bare `agents-traces` prints today's stats.
+- Skills and layout docs call the installed command `agents-traces`.
+- Event schema documents optional `origin` (`live` or `ingested`).
+
 ## [0.0.2] - 2026-09-26
 
 ### Added
@@ -30,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP self-heal tools: `get_last_session_trace`, `get_recent_errors`.
 - Multi-IDE MCP autowire (Cursor, Antigravity, Claude, Zed).
 
-[Unreleased]: https://github.com/Lolaplex/agents-traces/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/Lolaplex/agents-traces/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/Lolaplex/agents-traces/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/Lolaplex/agents-traces/compare/v0.42.0...v0.0.2
 [0.42.0]: https://github.com/Lolaplex/agents-traces/releases/tag/v0.42.0

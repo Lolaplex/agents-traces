@@ -7,8 +7,9 @@ Every trace event in `~/.agents/traces/YYYY-MM-DD.jsonl` is a single JSON object
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `ts` | string | Yes | ISO 8601 UTC timestamp (e.g. `"2026-08-20T03:15:22Z"`). |
-| `session` | string | Yes | Unique session identifier (e.g. `"s-8f92a"`). |
-| `type` | string | Yes | Event type discriminator: `tool_call`, `llm_call`, `file_edit`, `error`, `session_start`, `session_end`, `custom`. |
+| `session` | string | Yes | Session identifier. |
+| `type` | string | Yes | `tool_call`, `llm_call`, `file_edit`, `error`, `session_start`, `session_end`, or `custom`. |
+| `origin` | string | No | `live` or `ingested`. Omitted on older lines. |
 
 ---
 
