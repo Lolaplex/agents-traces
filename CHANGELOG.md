@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-09-26
+
 ### Added
 - Support for uniform `trace:` locator prefix in `session_view` and MCP self-diagnosis tools (e.g. `trace:ses_...`).
 
@@ -28,5 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP self-heal tools: `get_last_session_trace`, `get_recent_errors`.
 - Multi-IDE MCP autowire (Cursor, Antigravity, Claude, Zed).
 
-[Unreleased]: https://github.com/Lolaplex/agents-traces/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/Lolaplex/agents-traces/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/Lolaplex/agents-traces/compare/v0.42.0...v0.0.2
 [0.42.0]: https://github.com/Lolaplex/agents-traces/releases/tag/v0.42.0
