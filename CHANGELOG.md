@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - README and ABI list the live CLI (`assemble`, `ingest`, `analyze-models`, `record`) and all nine MCP tools. Bare `agents-traces` prints today's stats.
 - Skills and layout docs call the installed command `agents-traces`.
+- Event schema documents optional `origin` (`live` or `ingested`).
 
 ## [0.0.2] - 2026-09-26
 
