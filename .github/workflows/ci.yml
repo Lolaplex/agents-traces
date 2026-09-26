@@ -32,7 +32,7 @@ jobs:
       - name: Run test suite
         timeout-minutes: 5
         run: |
-          python scripts/sync_bundled.py --check || python scripts/sync_bundled.py
+          python scripts/sync_bundled.py --check
           python tests/run_all_tests.py
 
   notify-failure:

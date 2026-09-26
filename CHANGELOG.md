@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for uniform `trace:` locator prefix in `session_view` and MCP self-diagnosis tools (e.g. `trace:ses_...`).
 
 ### Changed
-- CI runs only on pull requests to `main`.
-- CI runs only on pull requests to `dev`/`main` and on manual dispatch, not on branch pushes or GitHub release events.
+- CI runs only on pull requests to `main` with strict bundled verification.
+- Documented complete suite of 9 MCP tools in README.md.
 
 ### Removed
 - Automatic package publishing and GitHub Release creation from Actions (no PyPI upload, no tag-triggered release).

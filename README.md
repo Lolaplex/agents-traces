@@ -96,7 +96,12 @@ Existing observability platforms (LangSmith, Langfuse, Arize Phoenix) require:
 | `get_last_session_trace` | `session_id` (optional), `limit` (default: `40`) | Returns the complete chronological execution timeline of tools, model calls, and file edits. |
 | `get_recent_errors` | `limit` (default: `10`), `session_id` (optional) | Retrieves recent failed tool calls, error stack traces, and arguments for agent self-repair. |
 | `get_session_stats` | `days` (default: `1`) | Aggregates token consumption, estimated USD costs, and tool success rates. |
+| `get_model_stats` | `model` (optional), `days` (default: `7`) | Empirical performance metrics, tool failure rates, and detected operational traps by model. |
 | `record_trace` | `session`, `type`, `tool`, `status`, `error`, `duration_ms` | Programmatically logs custom trace events into the local JSONL store. |
+| `ingest_traces` | *None* | Ingests recent IDE transcripts from Antigravity, Claude, Cursor, and Roo-Cline into local daily traces. |
+| `session_snap` | `limit` (default: `20`) | Recent user messages from the traces store (live MCP + ingested vendor chats). |
+| `session_grep` | `pattern`, `since` (optional) | Searches ingested and live session messages in traces. |
+| `session_tail` | `session_id` (optional), `limit` (default: `10`) | Tails recent session messages from traces for a specific session or overall. |
 
 ---
 
