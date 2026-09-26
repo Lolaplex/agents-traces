@@ -26,10 +26,13 @@ def get_last_session_trace(session_id: Optional[str] = None, limit: int = 40) ->
     Useful for self-diagnosis when a loop fails or when inspecting recent tool calls.
     
     Args:
-        session_id: Optional session identifier. If not provided, inspects the latest active session.
+        session_id: Optional session identifier (e.g. 'ses_abc' or 'trace:ses_abc'). If not provided, inspects the latest active session.
         limit: Max number of recent events to return (default 40).
     """
-    target_sid = session_id or store.get_last_session_id()
+    clean_sid = session_id.strip() if session_id else None
+    if clean_sid and clean_sid.startswith("trace:"):
+        clean_sid = clean_sid[len("trace:") :].strip()
+    target_sid = clean_sid or store.get_last_session_id()
     if not target_sid:
         return "No trace sessions recorded yet."
 
@@ -51,9 +54,12 @@ def get_recent_errors(limit: int = 10, session_id: Optional[str] = None) -> str:
     
     Args:
         limit: Number of recent errors to retrieve (default 10).
-        session_id: Optional session ID filter.
+        session_id: Optional session ID filter (e.g. 'ses_abc' or 'trace:ses_abc').
     """
-    errors = store.get_recent_errors(limit=limit, session_id=session_id)
+    clean_sid = session_id.strip() if session_id else None
+    if clean_sid and clean_sid.startswith("trace:"):
+        clean_sid = clean_sid[len("trace:") :].strip()
+    errors = store.get_recent_errors(limit=limit, session_id=clean_sid)
     if not errors:
         return "No errors recorded in recent traces. All systems green."
 

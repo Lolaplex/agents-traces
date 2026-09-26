@@ -148,6 +148,7 @@ def record_message(
     channel: str = "",
     user: str = "",
     user_id: str = "",
+    project: str = "",
     binary_refs: Optional[list[dict[str, str]]] = None,
     origin: str = "live",
 ) -> TraceEvent:
@@ -159,6 +160,8 @@ def record_message(
         "digest": content_digest(content[:20000]),
         "source": channel or "local",
     }
+    if project:
+        metadata["project"] = project
     if channel:
         metadata["channel"] = channel
         if user:

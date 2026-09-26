@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 from xml.sax.saxutils import escape
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 @dataclass
@@ -120,15 +121,30 @@ def clock_message(
     *,
     timezone_name: str = "",
 ) -> dict[str, str]:
-    """Ephemeral clock. Assemble after history so the system prefix stays cacheable."""
-    instant = now or datetime.now().astimezone()
+    """Ephemeral clock. Assemble after history so the system prefix stays cacheable.
+
+    If timezone_name is an IANA zone, convert the instant into that zone so the
+    label matches the offset. Invalid names fall back to UTC. Body is weekday
+    plus local ISO with offset (not a UTC stamp wearing a foreign label).
+    """
+    instant = now or datetime.now(timezone.utc)
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
+    tz_label = (timezone_name or "").strip()
+    if tz_label:
+        try:
+            instant = instant.astimezone(ZoneInfo(tz_label))
+        except (ZoneInfoNotFoundError, ValueError, OSError, KeyError):
+            instant = instant.astimezone(timezone.utc)
+            tz_label = "UTC"
+    else:
+        instant = instant.astimezone()
+        tz_label = str(instant.tzinfo or "UTC")
+    weekday = instant.strftime("%A")
     iso = instant.isoformat(timespec="seconds")
-    tz = timezone_name or str(instant.tzinfo or "UTC")
     return {
         "role": "system",
-        "content": f'<clock timezone="{_e(tz)}">{_e(iso)}</clock>',
+        "content": f'<clock timezone="{_e(tz_label)}">{_e(f"{weekday} {iso}")}</clock>',
     }
 
 
