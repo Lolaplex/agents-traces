@@ -39,3 +39,15 @@ Search those messages. `since` is optional.
 ### `session_tail(session_id="", limit=10)`
 
 Last messages for one session id, or the latest lines when `session_id` is empty.
+
+### `trace_seal(session_id=None, output_path=None)`
+
+Cryptographically seal tool invocations of a session into a SHA-256 hash chain starting at genesis. Optional `output_path` writes the sealed JSONL.
+
+### `trace_verify(path)`
+
+Cryptographically verify the integrity of a sealed SHA-256 hash chain JSONL file. Detects any tampering or broken link digests.
+
+### `trace_audit(session_id=None, path=None, allowed_tools=None)`
+
+Audit a session or JSONL transcript for non-determinism, redundant calls, and scope violations.

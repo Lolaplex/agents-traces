@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Cryptographic SHA-256 hash chaining for session tool calls (`seal_records`, `verify_chain`).
+- Session replay audit engine detecting non-determinism, divergence index, and redundant calls without intervening mutators.
+- Tool scope validation against declared permission boundaries (`load_scope`, `OVERREACH`).
+- CLI subcommands `seal`, `verify`, and `audit` (with `replay` alias).
+- MCP tools `trace_seal`, `trace_verify`, and `trace_audit`.
+
 ## [0.0.3] - 2026-09-26
 
 ### Changed

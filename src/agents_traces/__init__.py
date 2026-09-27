@@ -8,6 +8,22 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, Generator, Optional
 
+from .audit import (
+    GENESIS,
+    AuditError,
+    AuditRecord,
+    AuditResult,
+    Finding,
+    Scope,
+    SealedLink,
+    VerifyResult,
+    audit_replay,
+    load_scope,
+    load_sealed_jsonl,
+    parse_transcript_text,
+    seal_records,
+    verify_chain,
+)
 from .interceptor import append_trace, auto_trace_mcp, trace_call
 from .models import TraceEvent
 from .stats import compute_stats
@@ -117,4 +133,18 @@ __all__ = [
     "compute_stats",
     "render_timeline",
     "get_default_traces_dir",
+    "GENESIS",
+    "AuditError",
+    "AuditRecord",
+    "AuditResult",
+    "Finding",
+    "Scope",
+    "SealedLink",
+    "VerifyResult",
+    "audit_replay",
+    "load_scope",
+    "load_sealed_jsonl",
+    "parse_transcript_text",
+    "seal_records",
+    "verify_chain",
 ]

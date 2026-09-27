@@ -75,8 +75,11 @@ Primary surface. Agents diagnose a failed loop here.
 | `session_snap` | Recent user messages in the traces store |
 | `session_grep` | Search those messages |
 | `session_tail` | Last lines for one session, or the latest |
+| `trace_seal` | Cryptographically seal tool calls into a SHA-256 hash chain |
+| `trace_verify` | Verify cryptographic integrity of a sealed hash chain |
+| `trace_audit` | Audit for non-determinism, redundant calls, and scope violations |
 
-Nine tools. Full contract: [`abi/MCP.md`](abi/MCP.md).
+Twelve tools. Full contract: [`abi/MCP.md`](abi/MCP.md).
 
 ---
 
@@ -96,6 +99,9 @@ Ops / install / batch. Machine-readable catalog: `python -m agents_traces --help
 | `agents-traces assemble --session ID [--limit N] [--days N] [--include-tools]` | Rebuild chat messages for that session |
 | `agents-traces ingest` | IDE transcripts → daily JSONL |
 | `agents-traces cleanup [--keep-days N] [--compress]` | Delete old files, or gzip them |
+| `agents-traces seal [session\|file] [-o out]` | Seal tool calls into SHA-256 hash chain |
+| `agents-traces verify <file>` | Verify cryptographic hash chain integrity |
+| `agents-traces audit [session\|file] [--scope file]` | Replay audit for non-determinism & redundancy |
 | `agents-traces serve` / `mcp` | stdio MCP. Not the default command |
 | `agents-traces skills` / `sync-mcp` | Re-copy skills, or re-merge MCP |
 

@@ -32,6 +32,19 @@ warnings.filterwarnings("ignore", message=".*IncompleteFieldDefinitionWarning.*"
 warnings.filterwarnings("ignore", message=".*Field 'lifespan' has an incomplete definition.*")
 
 from . import __version__
+from .audit import (
+    GENESIS,
+    audit_replay,
+    events_to_records,
+    format_audit_text,
+    format_verify_text,
+    links_to_jsonl,
+    load_scope,
+    load_sealed_jsonl,
+    parse_transcript_text,
+    seal_records,
+    verify_chain,
+)
 from .cli_help import emit_help_json
 from .models import TraceEvent
 from .stats import compute_model_breakdown, compute_stats, format_model_breakdown_text, format_stats_text
@@ -183,6 +196,115 @@ def cmd_cleanup(args: argparse.Namespace, store: TraceStore) -> None:
     print(f"\033[32m✓ {action} {count} trace file(s) older than {args.keep_days} days.\033[0m")
 
 
+def cmd_seal(args: argparse.Namespace, store: TraceStore) -> int:
+    """Cryptographically seal tool calls into a SHA-256 hash chain."""
+    target = getattr(args, "target", None) or getattr(args, "session", None)
+    records = []
+    session_label = target or "latest"
+
+    if target and Path(target).is_file():
+        text = Path(target).read_text(encoding="utf-8", errors="replace")
+        records = parse_transcript_text(text)
+        session_label = Path(target).name
+    else:
+        sid = target or store.get_last_session_id()
+        if not sid:
+            print("\033[33mNo sessions found to seal.\033[0m")
+            return 1
+        session_label = sid
+        events = store.get_events_for_session(sid)
+        records = events_to_records(events)
+
+    if not records:
+        print(f"\033[33mNo tool calls found for '{session_label}'.\033[0m")
+        return 1
+
+    links = seal_records(records)
+    jsonl_output = links_to_jsonl(links)
+
+    out_path = getattr(args, "output", None)
+    if out_path:
+        out_p = Path(out_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(jsonl_output, encoding="utf-8")
+        print(f"\033[32m✓ Sealed {len(links)} tool calls into {out_path}\033[0m")
+        print(f"Head digest: {links[-1].digest if links else GENESIS}")
+    elif getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "status": "sealed",
+                    "session": session_label,
+                    "total_links": len(links),
+                    "head_digest": links[-1].digest if links else GENESIS,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(jsonl_output, end="")
+    return 0
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Verify cryptographic integrity of a sealed hash chain."""
+    path = getattr(args, "path", None)
+    if not path or not Path(path).is_file():
+        print(f"\033[31mError: file not found: {path}\033[0m")
+        return 1
+
+    links = load_sealed_jsonl(path)
+    res = verify_chain(links)
+
+    if getattr(args, "json", False):
+        print(json.dumps(res.to_dict(), indent=2))
+    else:
+        print(format_verify_text(res))
+    return 0 if res.ok else 1
+
+
+def cmd_audit(args: argparse.Namespace, store: TraceStore) -> int:
+    """Audit tool calls for non-determinism, redundant calls, and scope violations."""
+    target = getattr(args, "target", None) or getattr(args, "session", None)
+    records = []
+    session_label = target or "latest"
+
+    if target and Path(target).is_file():
+        text = Path(target).read_text(encoding="utf-8", errors="replace")
+        records = parse_transcript_text(text)
+        session_label = Path(target).name
+    else:
+        sid = target or store.get_last_session_id()
+        if not sid:
+            print("\033[33mNo sessions found to audit.\033[0m")
+            return 1
+        session_label = sid
+        events = store.get_events_for_session(sid)
+        records = events_to_records(events)
+
+    if not records:
+        print(f"\033[33mNo tool calls found for '{session_label}'.\033[0m")
+        return 0
+
+    scope = None
+    scope_path = getattr(args, "scope", None)
+    if scope_path:
+        try:
+            scope = load_scope(scope_path)
+        except Exception as exc:
+            print(f"\033[31mError loading scope: {exc}\033[0m")
+            return 1
+
+    res = audit_replay(records, allowed_tools=scope, session=session_label)
+
+    if getattr(args, "json", False):
+        print(json.dumps(res.to_dict(), indent=2))
+    else:
+        print(format_audit_text(res))
+
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agents-traces",
@@ -273,6 +395,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     # sync-mcp
     subparsers.add_parser("sync-mcp", help="Auto-inject MCP config into Cursor, Antigravity, Claude Desktop, Zed")
+
+    # seal
+    p_seal = subparsers.add_parser("seal", help="Cryptographically seal tool calls into a SHA-256 hash chain")
+    p_seal.add_argument("target", nargs="?", help="Session ID or transcript file path (defaults to latest)")
+    p_seal.add_argument("--session", help="Session ID filter")
+    p_seal.add_argument("--output", "-o", help="Output file path (default: stdout)")
+    p_seal.add_argument("--json", action="store_true", help="Output summary JSON")
+
+    # verify
+    p_verify = subparsers.add_parser("verify", help="Verify cryptographic integrity of a sealed hash chain")
+    p_verify.add_argument("path", help="Path to sealed JSONL file")
+    p_verify.add_argument("--json", action="store_true", help="Output verification result as JSON")
+
+    # audit / replay
+    p_audit = subparsers.add_parser("audit", help="Audit tool calls for non-determinism, redundant calls, and scope violations")
+    p_audit.add_argument("target", nargs="?", help="Session ID or transcript file path (defaults to latest)")
+    p_audit.add_argument("--session", help="Session ID filter")
+    p_audit.add_argument("--scope", help="Path to scope JSON file")
+    p_audit.add_argument("--json", action="store_true", help="Output audit result as JSON")
+
+    p_replay = subparsers.add_parser("replay", help="Alias for audit")
+    p_replay.add_argument("target", nargs="?", help="Session ID or transcript file path (defaults to latest)")
+    p_replay.add_argument("--session", help="Session ID filter")
+    p_replay.add_argument("--scope", help="Path to scope JSON file")
+    p_replay.add_argument("--json", action="store_true", help="Output audit result as JSON")
 
     return parser
 
@@ -385,6 +532,12 @@ def main(argv: list[str] | None = None) -> int:
         for r in res:
             print(f" * {r}")
         return 0
+    elif args.command == "seal":
+        return cmd_seal(args, store)
+    elif args.command == "verify":
+        return cmd_verify(args)
+    elif args.command in ("audit", "replay"):
+        return cmd_audit(args, store)
     else:
         # Default behavior: run stats for today
         cmd_stats(argparse.Namespace(date=None, days=1, json=False), store)

@@ -201,3 +201,121 @@ def session_tail(session_id: str = "", limit: int = 10) -> str:
     """Tail recent session messages from traces for one session id or the latest lines."""
     from .session_view import session_tail as view_tail
     return view_tail(session_id=session_id, limit=limit, store=store)
+
+
+@mcp.tool()
+def trace_seal(session_id: Optional[str] = None, output_path: Optional[str] = None) -> str:
+    """
+    Cryptographically seal tool invocations of a session into a SHA-256 hash chain.
+    Produces a tamper-evident record where modifying any prior call breaks all subsequent digests.
+
+    Args:
+        session_id: Optional session identifier (defaults to most recent session).
+        output_path: Optional file path to save the sealed JSONL chain.
+    """
+    from pathlib import Path
+    from .audit import GENESIS, events_to_records, links_to_jsonl, seal_records
+
+    clean_sid = session_id.strip() if session_id else None
+    if clean_sid and clean_sid.startswith("trace:"):
+        clean_sid = clean_sid[len("trace:") :].strip()
+    target_sid = clean_sid or store.get_last_session_id()
+    if not target_sid:
+        return json.dumps({"error": "No sessions found in traces."})
+
+    events = store.get_events_for_session(target_sid)
+    records = events_to_records(events)
+    if not records:
+        return json.dumps({"error": f"No tool calls found for session '{target_sid}'."})
+
+    links = seal_records(records)
+    head_digest = links[-1].digest if links else GENESIS
+
+    res: Dict[str, Any] = {
+        "status": "sealed",
+        "session": target_sid,
+        "total_links": len(links),
+        "head_digest": head_digest,
+    }
+
+    if output_path:
+        p = Path(output_path).expanduser().resolve()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(links_to_jsonl(links), encoding="utf-8")
+        res["output_path"] = str(p)
+
+    return json.dumps(res, indent=2)
+
+
+@mcp.tool()
+def trace_verify(path: str) -> str:
+    """
+    Cryptographically verify the integrity of a sealed SHA-256 hash chain JSONL file.
+    Detects any tampering, modification, insertion, deletion, or corrupted previous digest.
+
+    Args:
+        path: Path to the sealed JSONL file to verify.
+    """
+    from pathlib import Path
+    from .audit import load_sealed_jsonl, verify_chain
+
+    p = Path(path).expanduser().resolve()
+    if not p.is_file():
+        return json.dumps({"ok": False, "error": f"File not found: {path}"})
+
+    links = load_sealed_jsonl(p)
+    res = verify_chain(links)
+    return json.dumps(res.to_dict(), indent=2)
+
+
+@mcp.tool()
+def trace_audit(
+    session_id: Optional[str] = None,
+    path: Optional[str] = None,
+    allowed_tools: Optional[List[str]] = None,
+) -> str:
+    """
+    Audit an agent session or JSONL transcript for reproducibility and integrity issues.
+    Detects:
+    1. Non-determinism: identical call returning different responses (and divergence point).
+    2. Redundant calls: repeated identical call with no intervening state changes.
+    3. Permission overreach: calls outside declared allowed tools.
+
+    Args:
+        session_id: Optional session identifier to audit (defaults to most recent session).
+        path: Optional path to an external JSONL transcript or sealed log.
+        allowed_tools: Optional list of permitted tool names to enforce permission boundaries.
+    """
+    from pathlib import Path
+    from .audit import audit_replay, events_to_records, parse_transcript_text
+
+    records = []
+    target_session = None
+
+    if path:
+        p = Path(path).expanduser().resolve()
+        if not p.is_file():
+            return json.dumps({"error": f"File not found: {path}"})
+        records = parse_transcript_text(p.read_text(encoding="utf-8", errors="replace"))
+        target_session = p.name
+    else:
+        clean_sid = session_id.strip() if session_id else None
+        if clean_sid and clean_sid.startswith("trace:"):
+            clean_sid = clean_sid[len("trace:") :].strip()
+        target_sid = clean_sid or store.get_last_session_id()
+        if not target_sid:
+            return json.dumps({"error": "No sessions found in traces."})
+        target_session = target_sid
+        events = store.get_events_for_session(target_sid)
+        records = events_to_records(events)
+
+    if not records:
+        return json.dumps({
+            "session": target_session,
+            "call_count": 0,
+            "message": "No tool calls found to audit.",
+            "findings": [],
+        })
+
+    res = audit_replay(records, allowed_tools=allowed_tools, session=target_session)
+    return json.dumps(res.to_dict(), indent=2)

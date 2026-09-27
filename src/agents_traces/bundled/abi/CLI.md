@@ -16,6 +16,10 @@ No subcommand prints today's stats. It does not start the MCP server.
 - `agents-traces assemble --session ID [--limit N] [--days N] [--include-tools]` — rebuild chat-completions messages for that session.
 - `agents-traces ingest` — IDE transcripts into the daily JSONL.
 - `agents-traces cleanup [--keep-days N] [--compress]` — delete files older than N days (default 30), or gzip them when `--compress` is set.
+- `agents-traces seal [session_or_path] [--output file] [--json]` — cryptographically seal tool calls into a SHA-256 hash chain starting at genesis.
+- `agents-traces verify <path> [--json]` — verify cryptographic integrity of a sealed hash chain.
+- `agents-traces audit [session_or_path] [--scope file] [--json]` — replay tool calls to detect non-determinism, redundant calls, and scope violations.
+- `agents-traces replay …` — alias for `audit`.
 - `agents-traces serve` / `agents-traces mcp` — FastMCP stdio server.
 - `agents-traces skills` — copy skills again.
 - `agents-traces sync-mcp` — merge MCP config again.
