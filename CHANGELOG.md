@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Automatic daily and idle session rollover in `IdentityStore.resolve` (configurable `max_idle_hours` defaulting to 4h across calendar day boundaries) preventing infinite zombie session context accumulation.
 - Cryptographic SHA-256 hash chaining for session tool calls (`seal_records`, `verify_chain`).
 - Session replay audit engine detecting non-determinism, divergence index, and redundant calls without intervening mutators.
 - Tool scope validation against declared permission boundaries (`load_scope`, `OVERREACH`).

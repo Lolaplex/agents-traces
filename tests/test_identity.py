@@ -53,3 +53,36 @@ def test_legacy_trace_adopted_when_no_active_session():
         )
         assert resolved.session.id == "telegram-42"
         assert resolved.legacy is True
+
+
+def test_stale_session_auto_rollover_on_new_day():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = IdentityStore(Path(tmp) / "identity.json")
+        first = store.resolve(channel="telegram", user="5712")
+        # Simulate old session from 3 days ago with last_active 8 hours ago
+        first.session.start_date = "2026-09-01"
+        first.session.last_active = "2026-09-01T12:00:00Z"
+        store.save()
+
+        # Resolving now on a new day should roll over to a fresh session
+        second = store.resolve(channel="telegram", user="5712")
+        assert second.user.id == first.user.id
+        assert second.session.id != first.session.id
+        assert second.session.last_active
+
+
+def test_recent_session_across_midnight_does_not_rollover():
+    from datetime import datetime, timezone, timedelta
+    with tempfile.TemporaryDirectory() as tmp:
+        store = IdentityStore(Path(tmp) / "identity.json")
+        first = store.resolve(channel="telegram", user="5712")
+        # Simulate yesterday's date, but active 15 minutes ago
+        first.session.start_date = "2026-09-01"
+        recent = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+        first.session.last_active = recent
+        store.save()
+
+        # Should NOT roll over because user was active recently (< 4h)
+        second = store.resolve(channel="telegram", user="5712")
+        assert second.session.id == first.session.id
+
