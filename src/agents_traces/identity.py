@@ -103,14 +103,18 @@ class SessionRecord:
     user: str
     start_date: str
     created_at: str = ""
+    last_active: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "id": self.id,
             "user": self.user,
             "start_date": self.start_date,
             "created_at": self.created_at,
         }
+        if self.last_active:
+            d["last_active"] = self.last_active
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SessionRecord":
@@ -119,6 +123,7 @@ class SessionRecord:
             user=str(data.get("user") or ""),
             start_date=str(data.get("start_date") or today_utc()),
             created_at=str(data.get("created_at") or ""),
+            last_active=str(data.get("last_active") or ""),
         )
 
 
@@ -209,6 +214,7 @@ class IdentityStore:
             user=user.id,
             start_date=start_date or today_utc(),
             created_at=now,
+            last_active=now,
         )
         self._sessions[rec.id] = rec
         user.active_session = rec.id
@@ -274,6 +280,7 @@ class IdentityStore:
         work: str = "",
         project: str = "",
         legacy_exists: Optional[Callable[[str], bool]] = None,
+        max_idle_hours: float = 4.0,
     ) -> Resolved:
         """Map a channel handle (and optional session/user_id) onto one person + thread."""
         alias = alias_id(channel, user) if (channel and str(user).strip()) else ""
@@ -282,6 +289,7 @@ class IdentityStore:
 
         self._ensure()
         legacy = False
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         if session and session.lower() not in ("new", "new_session"):
             rec = self._sessions.get(session)
@@ -290,7 +298,8 @@ class IdentityStore:
                     id=session,
                     user="",
                     start_date=today_utc(),
-                    created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    created_at=now_iso,
+                    last_active=now_iso,
                 )
                 self._sessions[session] = rec
             person = None
@@ -311,6 +320,7 @@ class IdentityStore:
             if project:
                 person.project = project
             person.active_session = rec.id
+            rec.last_active = now_iso
             self.save()
             return Resolved(user=person, session=rec, alias=alias, legacy=not rec.id.startswith("ses_"))
 
@@ -329,6 +339,24 @@ class IdentityStore:
 
         if person.active_session and person.active_session in self._sessions:
             rec = self._sessions[person.active_session]
+            is_stale = False
+            today = today_utc()
+            if max_idle_hours > 0 and rec.start_date != today:
+                if rec.last_active:
+                    try:
+                        last_dt = datetime.fromisoformat(rec.last_active.replace("Z", "+00:00"))
+                        now_dt = datetime.now(timezone.utc)
+                        hours_idle = (now_dt - last_dt).total_seconds() / 3600.0
+                        if hours_idle >= max_idle_hours:
+                            is_stale = True
+                    except Exception:
+                        is_stale = True
+                else:
+                    is_stale = True
+
+            if is_stale:
+                rec = self._new_session(person)
+            rec.last_active = now_iso
             self.save()
             return Resolved(user=person, session=rec, alias=alias)
 
@@ -343,6 +371,7 @@ class IdentityStore:
                     user=person.id,
                     start_date=today_utc(),
                     created_at="",
+                    last_active=now_iso,
                 )
                 self._sessions[old] = rec
                 person.active_session = old
