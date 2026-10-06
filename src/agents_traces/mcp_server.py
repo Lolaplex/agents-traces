@@ -16,6 +16,14 @@ from .store import TraceStore
 from .timeline import render_timeline
 
 mcp = FastMCP("agents-traces")
+try:
+    from . import __version__
+    from .updates import attach_mcp_update_notice
+
+    attach_mcp_update_notice(mcp, "agents-traces", __version__)
+except Exception:
+    pass
+
 store = TraceStore()
 
 
