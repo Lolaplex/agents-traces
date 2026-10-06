@@ -63,11 +63,13 @@ def test_assemble_evicts_old_tool_stdio_keeps_user():
     with tempfile.TemporaryDirectory() as tmp:
         store = TraceStore(traces_dir=tmp)
         sid = session_id_for("http", "fabian")
+        from datetime import datetime, timezone
+        now_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         store.append(
             TraceEvent(
                 session=sid,
                 type="message",
-                ts="2026-08-31T00:00:00Z",
+                ts=f"{now_prefix}T00:00:00Z",
                 metadata={"role": "user", "content": "run it"},
             )
         )
@@ -77,7 +79,7 @@ def test_assemble_evicts_old_tool_stdio_keeps_user():
                 type="tool_call",
                 tool="shell",
                 result="early\n" + ("a" * 900),
-                ts="2026-08-31T00:00:01Z",
+                ts=f"{now_prefix}T00:00:01Z",
             )
         )
         store.append(
@@ -86,7 +88,7 @@ def test_assemble_evicts_old_tool_stdio_keeps_user():
                 type="tool_call",
                 tool="shell",
                 result="late\n" + ("b" * 900),
-                ts="2026-08-31T00:00:02Z",
+                ts=f"{now_prefix}T00:00:02Z",
             )
         )
         msgs = assemble_messages(sid, store=store, limit=20, include_tools=True)
