@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-06
+
 ### Added
 - Automatic daily and idle session rollover in `IdentityStore.resolve` (configurable `max_idle_hours` defaulting to 4h across calendar day boundaries) preventing infinite zombie session context accumulation.
 - Cryptographic SHA-256 hash chaining for session tool calls (`seal_records`, `verify_chain`).
@@ -45,7 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP self-heal tools: `get_last_session_trace`, `get_recent_errors`.
 - Multi-IDE MCP autowire (Cursor, Antigravity, Claude, Zed).
 
-[Unreleased]: https://github.com/Lolaplex/agents-traces/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/Lolaplex/agents-traces/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Lolaplex/agents-traces/compare/v0.0.3...v0.1.0
 [0.0.3]: https://github.com/Lolaplex/agents-traces/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/Lolaplex/agents-traces/compare/v0.42.0...v0.0.2
 [0.42.0]: https://github.com/Lolaplex/agents-traces/releases/tag/v0.42.0
