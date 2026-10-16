@@ -15,7 +15,15 @@ from .stats import compute_model_breakdown, compute_stats
 from .store import TraceStore
 from .timeline import render_timeline
 
-mcp = FastMCP("agents-traces")
+TRACES_INSTRUCTIONS = (
+    "agents-traces — local append-only JSONL execution observability and session diagnostics.\n"
+    "- PROACTIVE USAGE: Whenever tool calls fail repeatedly, an agent loop stalls, or the user asks "
+    "what broke or happened in the current/last session, ALWAYS call `get_recent_errors`, "
+    "`get_last_session_trace`, or `session_snap` / `session_grep`.\n"
+    "- Use `get_session_stats` and `get_model_stats` to inspect token consumption, costs, and tool error rates."
+)
+
+mcp = FastMCP("agents-traces", instructions=TRACES_INSTRUCTIONS)
 try:
     from . import __version__
     from .updates import attach_mcp_update_notice
@@ -31,8 +39,9 @@ store = TraceStore()
 def get_last_session_trace(session_id: Optional[str] = None, limit: int = 40) -> str:
     """
     Get the execution trace and timeline of the current or most recent agent session.
-    Useful for self-diagnosis when a loop fails or when inspecting recent tool calls.
-    
+
+    PROACTIVE USAGE: ALWAYS call this tool when diagnosing why a recent loop stalled or inspecting the timeline of recent tool calls.
+
     Args:
         session_id: Optional session identifier (e.g. 'ses_abc' or 'trace:ses_abc'). If not provided, inspects the latest active session.
         limit: Max number of recent events to return (default 40).
@@ -58,8 +67,9 @@ def get_last_session_trace(session_id: Optional[str] = None, limit: int = 40) ->
 def get_recent_errors(limit: int = 10, session_id: Optional[str] = None) -> str:
     """
     Query recent tool failures and errors across sessions or in a specific session.
-    Helps agents self-diagnose why specific tool calls or commands failed.
-    
+
+    PROACTIVE USAGE: ALWAYS call this tool immediately when tool calls fail repeatedly or when asked to diagnose recent errors.
+
     Args:
         limit: Number of recent errors to retrieve (default 10).
         session_id: Optional session ID filter (e.g. 'ses_abc' or 'trace:ses_abc').

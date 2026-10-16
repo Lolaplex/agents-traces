@@ -49,7 +49,7 @@ from .cli_help import emit_help_json
 from .models import TraceEvent
 from .stats import compute_model_breakdown, compute_stats, format_model_breakdown_text, format_stats_text
 from .store import TraceStore
-from .sync import merge_agent_mcp, sync_skills
+from .sync import merge_agent_mcp, sync_always_on_files, sync_host_rules, sync_skills
 from .timeline import render_timeline
 
 
@@ -324,8 +324,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-    # init
-    subparsers.add_parser("init", help="Plug & Play setup: auto-configure MCP in all IDEs and sync skills")
+    # init / sync
+    subparsers.add_parser("init", help="Plug & Play setup: auto-configure rules, MCP, and skills in all IDEs")
+    p_sync = subparsers.add_parser("sync", help="Auto-configure rules, MCP, and skills across all IDEs")
+    p_sync.add_argument("--init", action="store_true", help="Alias for full Plug & Play setup")
 
     # stats
     p_stats = subparsers.add_parser("stats", help="Display token, cost and tool statistics")
@@ -450,15 +452,19 @@ def main(argv: list[str] | None = None) -> int:
 
     store = TraceStore()
 
-    if args.command == "init":
+    if args.command in ("init", "sync"):
         print("=== Initializing agents-traces (Plug & Play) ===\n")
+        rules_res = sync_host_rules()
+        always_on_res = sync_always_on_files()
+        print(f"1. Synced {len(rules_res)} always-apply rules and {len(always_on_res)} global instruction files.")
+
         synced = sync_skills()
-        print(f"1. Synced {len(synced)} agent skills:")
+        print(f"\n2. Synced {len(synced)} agent skills:")
         for s in synced:
             print(f"   * {s}")
 
         mcp_res = merge_agent_mcp()
-        print(f"\n2. Auto-configured MCP servers in {len(mcp_res)} IDE config files:")
+        print(f"\n3. Auto-configured MCP servers in {len(mcp_res)} IDE config files:")
         for r in mcp_res:
             print(f"   * {r}")
 
