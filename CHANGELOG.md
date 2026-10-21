@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-21
+
+### Added
+- Standalone 6-lever host wiring and proactive MCP instruction injection in `agents_traces.sync`.
+- Proactive self-diagnosis rules instructing coding agents to inspect recent errors via `agents-traces` when tool errors or loop stalls occur.
+
 ## [0.1.0] - 2026-10-06
 
 ### Added
