@@ -89,6 +89,20 @@ def assemble_messages(
         for e in target.iter_events(files=files, session_id=session)
         if e.type == "message" or (include_tools and e.type == "tool_call")
     ]
+    if len(events) < limit and store is None:
+        try:
+            from .identity import IdentityStore
+            srec = IdentityStore().get_session(session)
+            prev_sid = srec.prev_session if srec else ""
+            if prev_sid:
+                prev_events = [
+                    e
+                    for e in target.iter_events(files=files, session_id=prev_sid)
+                    if e.type == "message" or (include_tools and e.type == "tool_call")
+                ]
+                events = prev_events + events
+        except Exception:
+            pass
     events.sort(key=lambda e: e.ts or "")
     out: list[dict[str, Any]] = []
     for event in events:

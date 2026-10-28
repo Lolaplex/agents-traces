@@ -104,6 +104,7 @@ class SessionRecord:
     start_date: str
     created_at: str = ""
     last_active: str = ""
+    prev_session: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -114,6 +115,8 @@ class SessionRecord:
         }
         if self.last_active:
             d["last_active"] = self.last_active
+        if self.prev_session:
+            d["prev_session"] = self.prev_session
         return d
 
     @classmethod
@@ -124,6 +127,7 @@ class SessionRecord:
             start_date=str(data.get("start_date") or today_utc()),
             created_at=str(data.get("created_at") or ""),
             last_active=str(data.get("last_active") or ""),
+            prev_session=str(data.get("prev_session") or ""),
         )
 
 
@@ -355,7 +359,9 @@ class IdentityStore:
                     is_stale = True
 
             if is_stale:
+                prior_sid = rec.id
                 rec = self._new_session(person)
+                rec.prev_session = prior_sid
             rec.last_active = now_iso
             self.save()
             return Resolved(user=person, session=rec, alias=alias)

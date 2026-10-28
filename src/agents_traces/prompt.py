@@ -148,8 +148,8 @@ def clock_message(
     }
 
 
-PREVIEW_CHARS = 768
-HISTORY_CHARS = 24000
+PREVIEW_CHARS = 1600
+HISTORY_CHARS = 32000
 # Last tool *round* (consecutive role=tool after one assistant) keeps a preview.
 # Earlier large stdio is stubbed in place. Small results stay (errors, "ok").
 KEEP_RECENT_STDIO_ROUNDS = 1
