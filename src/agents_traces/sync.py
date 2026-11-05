@@ -21,7 +21,7 @@ RULE_FILENAME = "agents-traces.mdc"
 
 ALWAYS_ON_BODY = """# Execution Observability (`agents-traces`)
 
-- **Self-Diagnosis on Errors**: When tool calls fail repeatedly, a loop stalls, or the user asks what happened in the current/last session, PROACTIVELY call MCP `agents-traces` (`get_recent_errors`, `get_last_session_trace`, `session_snap`, `session_grep`, `session_tail`).
+- **Self-Diagnosis on Errors**: When tool calls fail repeatedly, a loop stalls, or the user asks what happened in the current/last session, PROACTIVELY call MCP `agents-traces` (`get_recent_errors`, `get_last_session_trace`, `session_snap`, `session_grep`, `session_tail`). A `<ref digest="...">` marker is an address: call `read_content(session_id, digest)` for the full text. Do not invent the omitted part.
 - **Token & Model Telemetry**: Use `get_session_stats` and `get_model_stats` for empirical token/cost/failure-rate metrics across sessions."""
 
 

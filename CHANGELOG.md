@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Content-addressed artifacts under `content/<sha256[:2]>/<sha256>` keep the full UTF-8 text of message bodies, tool results, errors, and stacks. Daily JSONL stays bounded at 20,000 characters.
+- Truncated records store `truncated`, `chars` (original length), `digest` (12-hex SHA-256 prefix), and `sha256`. Prompt `<ref>` and `<stdio>` markers include `truncated="1"` plus that digest and length.
+- `read_content(session, digest, offset=0, limit=None)` verifies the digest, then returns a character window. MCP tool `read_content` and `agents-traces read` expose the same call. `DigestMismatchError` means the stored bytes do not match `digest`.
+- `session_grep` accepts `until` as well as `since` (`YYYY-MM-DD` or an ISO timestamp) and skips daily files outside that window. A date bound covers the whole UTC day.
+
+### Changed
+- `record_message` no longer drops characters past 20,000. The stored digest is the hash of the full text. The JSONL field is a prefix when the body is longer; the tail is the artifact.
+- Live tool results are no longer clipped at 300 characters. Up to 20,000 characters stay on the event. Longer results, errors, and stacks spill the same way.
+- Ingest no longer pre-slices message bodies at 2,000 characters or error strings at 200. They use the same 20,000-character inline bound.
+- Payloads already stored by an older build are unchanged. Text that was sliced off before this change cannot be reconstructed; `read_content` returns and checks only the bytes that were kept.
+
 ## [0.1.1] - 2026-10-21
 
 ### Added

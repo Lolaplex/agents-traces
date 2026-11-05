@@ -15,7 +15,7 @@ def now_utc_iso() -> str:
 class TraceEvent:
     ts: str = field(default_factory=now_utc_iso)
     session: str = "default"
-    type: str = "custom"  # tool_call, llm_call, file_edit, error, session_start, session_end, custom
+    type: str = "custom"  # tool_call, llm_call, file_edit, error, session_start, session_end, message, custom
     origin: Optional[str] = None  # live | ingested — provenance of the event
 
     # Tool call fields

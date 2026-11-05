@@ -24,6 +24,16 @@ from .audit import (
     seal_records,
     verify_chain,
 )
+from .content import (
+    INLINE_CONTENT_CHARS,
+    ContentError,
+    ContentNotFoundError,
+    ContentSlice,
+    DigestMismatchError,
+    content_digest,
+    content_sha256,
+    read_content,
+)
 from .interceptor import append_trace, auto_trace_mcp, trace_call
 from .models import TraceEvent
 from .stats import compute_stats
@@ -133,6 +143,14 @@ __all__ = [
     "compute_stats",
     "render_timeline",
     "get_default_traces_dir",
+    "INLINE_CONTENT_CHARS",
+    "ContentError",
+    "ContentNotFoundError",
+    "ContentSlice",
+    "DigestMismatchError",
+    "content_digest",
+    "content_sha256",
+    "read_content",
     "GENESIS",
     "AuditError",
     "AuditRecord",

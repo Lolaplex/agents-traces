@@ -1,6 +1,6 @@
 """
 CLI entry point for agents-trace.
-Commands: init, stats, inspect, sessions, tail, record, assemble, cleanup, ingest, serve, skills, sync-mcp
+Commands: init, stats, inspect, sessions, tail, record, assemble, read, cleanup, ingest, serve, skills, sync-mcp
 """
 
 from __future__ import annotations
@@ -187,6 +187,47 @@ def cmd_record(args: argparse.Namespace, store: TraceStore) -> None:
     )
     store.append(event)
     print(f"\033[32m✓ Recorded event to {store.get_date_file_path().name}\033[0m")
+
+
+def cmd_read(args: argparse.Namespace, store: TraceStore) -> int:
+    """Print retained message or tool text addressed by digest."""
+    from .content import ContentError, read_content
+
+    try:
+        piece = read_content(
+            args.session,
+            args.digest,
+            offset=args.offset,
+            limit=args.limit,
+            store=store,
+        )
+    except ContentError as exc:
+        payload = {"error": exc.code, "message": str(exc), "digest": args.digest}
+        if getattr(args, "json", False):
+            print(json.dumps(payload))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        payload = {"error": "bad_request", "message": str(exc)}
+        if getattr(args, "json", False):
+            print(json.dumps(payload))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(piece.to_dict(), ensure_ascii=False))
+    else:
+        if piece.truncated:
+            print(
+                f"window {len(piece.text)} chars at offset {piece.offset} of {piece.total_chars} "
+                f"(digest {piece.digest_short})",
+                file=sys.stderr,
+            )
+        sys.stdout.write(piece.text)
+        if not piece.text.endswith("\n"):
+            sys.stdout.write("\n")
+    return 0
 
 
 def cmd_cleanup(args: argparse.Namespace, store: TraceStore) -> None:
@@ -385,6 +426,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_assemble.add_argument("--days", type=int, default=30, help="Trace files to scan")
     p_assemble.add_argument("--include-tools", action="store_true")
 
+    p_read = subparsers.add_parser(
+        "read",
+        help="Read retained message or tool content by digest",
+    )
+    p_read.add_argument("--session", required=True, help="Session id (trace: prefix optional)")
+    p_read.add_argument("--digest", required=True, help="12-char ref digest or full SHA-256")
+    p_read.add_argument("--offset", type=int, default=0, help="Character offset into the full text")
+    p_read.add_argument("--limit", type=int, default=None, help="Max characters (default: through the end)")
+    p_read.add_argument("--json", action="store_true", help="Print the verified window as JSON")
+
     # ingest
     subparsers.add_parser("ingest", help="Ingest IDE transcripts (Antigravity / Cursor) into traces")
 
@@ -504,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps({"session": args.session, "messages": msgs}, ensure_ascii=False, indent=2))
         return 0
+    elif args.command == "read":
+        return cmd_read(args, store)
     elif args.command == "ingest":
         from .ingest import ingest_all_ide_transcripts
         res = ingest_all_ide_transcripts(store=store)
