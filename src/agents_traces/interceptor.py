@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import json
 import os
 import time
 from pathlib import Path
@@ -44,16 +45,20 @@ def get_global_store() -> TraceStore:
     return _global_store
 
 
-def _summarize(res: Any, limit: int = 300) -> Optional[str]:
-    """Truncated result summary — enough to verify hits offline without
-    storing full payloads."""
+def _result_text(res: Any) -> Optional[str]:
+    """Full tool result as text. Append spills past the inline cap.
+
+    The trace line stays bounded. The tail is a content artifact addressed
+    by digest, not a dropped slice.
+    """
     if res is None:
         return None
+    if isinstance(res, str):
+        return res
     try:
-        text = res if isinstance(res, str) else json.dumps(res, default=str)
+        return json.dumps(res, ensure_ascii=False, default=str)
     except Exception:
-        text = str(res)
-    return text[:limit]
+        return str(res)
 
 
 def append_trace(
@@ -110,7 +115,7 @@ def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
                         args=kwargs,
                         status="ok",
                         duration_ms=dur,
-                        result=_summarize(res),
+                        result=_result_text(res),
                     )
                     return res
                 except Exception as e:
@@ -142,7 +147,7 @@ def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
                         args=kwargs,
                         status="ok",
                         duration_ms=dur,
-                        result=_summarize(res),
+                        result=_result_text(res),
                     )
                     return res
                 except Exception as e:

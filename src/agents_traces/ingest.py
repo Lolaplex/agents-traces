@@ -241,7 +241,7 @@ def parse_antigravity_transcript(path: Path) -> Generator[TraceEvent, None, None
                     metadata={
                         "source": "antigravity",
                         "role": "user",
-                        "content": str(item.get("content", ""))[:2000],
+                        "content": str(item.get("content", "")),
                     },
                 )
                 yield TraceEvent(
@@ -265,7 +265,7 @@ def parse_antigravity_transcript(path: Path) -> Generator[TraceEvent, None, None
                         metadata={
                             "source": "antigravity",
                             "role": "assistant",
-                            "content": content[:2000],
+                            "content": content,
                         },
                     )
                 tool_calls = item.get("tool_calls") or []
@@ -327,7 +327,7 @@ def parse_antigravity_transcript(path: Path) -> Generator[TraceEvent, None, None
                         session=sid,
                         type="error",
                         origin="ingested",
-                        error=content[:200],
+                        error=content,
                         status="error",
                         metadata={"source": "antigravity"},
                     )
@@ -414,7 +414,7 @@ def parse_cline_task(path: Path) -> Generator[TraceEvent, None, None]:
                         session=sid,
                         type="error",
                         origin="ingested",
-                        error=str(msg.get("text", ""))[:200],
+                        error=str(msg.get("text", "")),
                         status="error",
                         metadata={"source": "cline"},
                     )
@@ -482,7 +482,7 @@ def parse_cursor_transcript(path: Path) -> Generator[TraceEvent, None, None]:
                 m = re.search(r"<user_query>\s*(.*?)\s*</user_query>", blob, re.S)
                 if m:
                     query = m.group(1)
-                query = query.strip()[:2000]
+                query = query.strip()
                 if not started:
                     started = True
                     yield TraceEvent(
@@ -508,7 +508,7 @@ def parse_cursor_transcript(path: Path) -> Generator[TraceEvent, None, None]:
                     continue
                 ptype = part.get("type")
                 if ptype == "text" and part.get("text"):
-                    texts.append(str(part.get("text"))[:2000])
+                    texts.append(str(part.get("text")))
                 elif ptype == "tool_use":
                     raw_name = str(part.get("name") or "tool")
                     inp = part.get("input") if isinstance(part.get("input"), dict) else {}

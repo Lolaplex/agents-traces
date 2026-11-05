@@ -18,3 +18,4 @@ Use this skill when a task fails, a tool call throws an exception, or you need t
 4. To analyze root causes:
    - Read the exact arguments passed to the failed tool.
    - Check error messages and stack traces to fix parameters or environment states without asking the user.
+5. A `<ref digest="...">` or `<stdio ... digest="...">` marker is truncated text, not a summary. Fetch it with `read_content(session_id, digest)` (`offset` and `limit` for a window). The digest is checked against the stored bytes. Do not fill the gap from memory.

@@ -14,6 +14,7 @@ No subcommand prints today's stats. It does not start the MCP server.
 - `agents-traces tail [-n N] [-f] [--raw]` — end of today's file. `-f` follows. `--raw` prints JSONL.
 - `agents-traces record --session … --type …` — append one event. Optional `--tool`, `--status`, `--error`, `--duration`, `--tokens-in`, `--tokens-out`, `--cost`, `--file`, `--data`.
 - `agents-traces assemble --session ID [--limit N] [--days N] [--include-tools]` — rebuild chat-completions messages for that session.
+- `agents-traces read --session ID --digest HEX [--offset N] [--limit N] [--json]` — fetch retained message or tool text. Checks the digest, then applies the character window. Exit 1 on mismatch or miss. `--json` prints the window object (or `{"error": "digest_mismatch"|"not_found"|...}`).
 - `agents-traces ingest` — IDE transcripts into the daily JSONL.
 - `agents-traces cleanup [--keep-days N] [--compress]` — delete files older than N days (default 30), or gzip them when `--compress` is set.
 - `agents-traces seal [session_or_path] [--output file] [--json]` — cryptographically seal tool calls into a SHA-256 hash chain starting at genesis.

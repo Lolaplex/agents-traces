@@ -20,6 +20,9 @@ TRACES_INSTRUCTIONS = (
     "- PROACTIVE USAGE: Whenever tool calls fail repeatedly, an agent loop stalls, or the user asks "
     "what broke or happened in the current/last session, ALWAYS call `get_recent_errors`, "
     "`get_last_session_trace`, or `session_snap` / `session_grep`.\n"
+    "- A `<ref digest=\"...\">` or `<stdio ... digest=\"...\">` marker is an address, not a summary. "
+    "Call `read_content` with the session id and that digest (offset and limit for a window). "
+    "Do not invent the omitted text.\n"
     "- Use `get_session_stats` and `get_model_stats` to inspect token consumption, costs, and tool error rates."
 )
 
@@ -83,7 +86,7 @@ def get_recent_errors(limit: int = 10, session_id: Optional[str] = None) -> str:
 
     results = []
     for e in errors:
-        results.append({
+        item = {
             "ts": e.ts,
             "session": e.session,
             "tool": e.tool,
@@ -91,7 +94,18 @@ def get_recent_errors(limit: int = 10, session_id: Optional[str] = None) -> str:
             "error": e.error,
             "stack": e.stack,
             "status": e.status,
-        })
+        }
+        meta = e.metadata if isinstance(e.metadata, dict) else {}
+        for prefix in ("error_", "stack_", "result_", ""):
+            flag = f"{prefix}truncated" if prefix else "truncated"
+            if not meta.get(flag):
+                continue
+            item[flag] = True
+            for leaf in ("chars", "digest", "sha256"):
+                key = f"{prefix}{leaf}" if prefix else leaf
+                if key in meta:
+                    item[key] = meta[key]
+        results.append(item)
     return json.dumps(results, indent=2)
 
 
@@ -208,10 +222,53 @@ def session_snap(limit: int = 20) -> str:
 
 
 @mcp.tool()
-def session_grep(pattern: str, since: str = "") -> str:
-    """Search ingested and live session messages in traces (not markdown memory)."""
+def session_grep(pattern: str, since: str = "", until: str = "") -> str:
+    """Search ingested and live session messages in traces (not markdown memory).
+
+    ``since`` and ``until`` are ISO timestamps or ``YYYY-MM-DD`` (that whole UTC day).
+    """
     from .session_view import session_grep as view_grep
-    return view_grep(pattern=pattern, since=since, store=store)
+    return view_grep(pattern=pattern, since=since, until=until, store=store)
+
+
+@mcp.tool()
+def read_content(session_id: str, digest: str, offset: int = 0, limit: int = -1) -> str:
+    """Fetch retained message or tool text by session and digest.
+
+    Verifies SHA-256 of the stored bytes against ``digest`` (64 hex characters,
+    or the 12-character prefix from ``<ref digest="...">``). ``offset`` is a
+    character index into the full text. ``limit`` < 0 reads through the end;
+    ``limit`` >= 0 returns at most that many characters. The JSON includes
+    ``total_chars`` and ``truncated`` so a window is not mistaken for the body.
+
+    Args:
+        session_id: Session id (``trace:`` prefix optional).
+        digest: Content digest from a ref, record, or SHA-256 of the full text.
+        offset: Character offset into the full text (default 0).
+        limit: Maximum characters to return. Negative means through the end.
+    """
+    from .content import ContentError, read_content as read_body
+
+    try:
+        piece = read_body(
+            session_id,
+            digest,
+            offset=offset,
+            limit=None if limit < 0 else limit,
+            store=store,
+        )
+    except ContentError as exc:
+        return json.dumps(
+            {
+                "error": exc.code,
+                "message": str(exc),
+                "session": session_id,
+                "digest": digest,
+            }
+        )
+    except ValueError as exc:
+        return json.dumps({"error": "bad_request", "message": str(exc)})
+    return json.dumps(piece.to_dict(), ensure_ascii=False)
 
 
 @mcp.tool()
