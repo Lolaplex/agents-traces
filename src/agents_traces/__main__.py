@@ -383,6 +383,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_assemble.add_argument("--days", type=int, default=30, help="Trace files to scan")
     p_assemble.add_argument("--include-tools", action="store_true")
 
+    # compact (typed frame over older events; raw stays in the store)
+    p_compact = subparsers.add_parser(
+        "compact",
+        help="Append a compaction frame covering a session's older events",
+    )
+    p_compact.add_argument("--session", required=True, help="Session id (ses_… or legacy channel-user)")
+    p_compact.add_argument("--keep-last", type=int, default=6, help="Newest events left uncovered (default 6)")
+    p_compact.add_argument("--days", type=int, default=90, help="Trace files to scan")
+    p_compact.add_argument("--content", help="Replayed text (default: deterministic skeleton)")
+    p_compact.add_argument("--json", action="store_true", help="Output raw JSON")
+
     # ingest
     subparsers.add_parser("ingest", help="Ingest IDE transcripts (Antigravity / Cursor) into traces")
 
@@ -497,6 +508,26 @@ def main(argv: list[str] | None = None) -> int:
             include_tools=args.include_tools,
         )
         print(json.dumps({"session": args.session, "messages": msgs}, ensure_ascii=False, indent=2))
+        return 0
+    elif args.command == "compact":
+        from .frames import compact_session
+
+        frame = compact_session(
+            args.session,
+            store=store,
+            keep_last=args.keep_last,
+            content=args.content or "",
+            days=args.days,
+        )
+        if args.json:
+            print(json.dumps({"frame": frame.to_dict() if frame else None}, ensure_ascii=False))
+        elif frame is None:
+            print(f"\033[1;33mNothing to compact for {args.session}\033[0m")
+        else:
+            md = frame.metadata or {}
+            rng = md.get("summarized_from") or {}
+            print(f"\033[1;36m=== Compacted {rng.get('count')} events ({rng.get('first_ts')}→{rng.get('last_ts')}) ===\033[0m")
+            print(md.get("content", ""))
         return 0
     elif args.command == "ingest":
         from .ingest import ingest_all_ide_transcripts

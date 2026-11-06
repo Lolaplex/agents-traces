@@ -212,6 +212,33 @@ def session_tail(session_id: str = "", limit: int = 10) -> str:
 
 
 @mcp.tool()
+def session_compact(session_id: str, keep_last: int = 6, content: str = "") -> str:
+    """Append a compaction frame covering a session's older events.
+
+    The frame replays ``content`` (or a deterministic skeleton) in place of
+    the covered span during assemble; the raw events stay in the store.
+    Pass ``content`` to write an LLM-authored summary frame.
+    """
+    from .frames import compact_session
+
+    frame = compact_session(
+        session_id,
+        store=store,
+        keep_last=keep_last,
+        content=content,
+        source="mcp" if content else "deterministic",
+    )
+    if frame is None:
+        return f"nothing to compact for {session_id}"
+    md = frame.metadata or {}
+    rng = md.get("summarized_from") or {}
+    return (
+        f"compacted {rng.get('count')} events "
+        f"({rng.get('first_ts')}→{rng.get('last_ts')})"
+    )
+
+
+@mcp.tool()
 def trace_seal(session_id: Optional[str] = None, output_path: Optional[str] = None) -> str:
     """
     Cryptographically seal tool invocations of a session into a SHA-256 hash chain.

@@ -84,14 +84,37 @@ def assemble_messages(
     """
     target = store or TraceStore()
     files = target.list_trace_files(days=days)
-    events = [
+    all_events = [
         e
         for e in target.iter_events(files=files, session_id=session)
-        if e.type == "message" or (include_tools and e.type == "tool_call")
+        if e.type == "message" or e.type == "frame" or (include_tools and e.type == "tool_call")
     ]
-    events.sort(key=lambda e: e.ts or "")
+    all_events.sort(key=lambda e: e.ts or "")
+
+    # Compaction frames replace the events they cover (see frames.py).
+    from .frames import frame_meta, is_frame
+
+    covered: list[tuple[str, str, int]] = []  # (first_ts, last_ts, covering frame)
+    for e in all_events:
+        if is_frame(e):
+            rng = frame_meta(e).get("summarized_from") or {}
+            if rng.get("first_ts") and rng.get("last_ts"):
+                covered.append((str(rng["first_ts"]), str(rng["last_ts"]), id(e)))
+
+    events = []
+    for e in all_events:
+        ts = e.ts or ""
+        if any(first <= ts <= last and id(e) != cover for first, last, cover in covered):
+            continue
+        events.append(e)
+
     out: list[dict[str, Any]] = []
     for event in events:
+        if is_frame(event):
+            content = str(frame_meta(event).get("content") or "")
+            if content:
+                out.append({"role": "system", "content": stamp_content(event.ts or "", content)})
+            continue
         if event.type == "message":
             role = str(_meta(event).get("role") or "user").lower()
             if role not in ("user", "assistant", "system", "tool"):

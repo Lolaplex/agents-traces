@@ -2,13 +2,25 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
+
+_last_ts = ""
 
 
 def now_utc_iso() -> str:
-    """Return current UTC timestamp in ISO 8601 format."""
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    """Return current UTC timestamp in ISO 8601 format.
+
+    Monotonic within the process: same-millisecond appends get bumped +1ms so
+    event ts stays a unique ordering key (frame provenance is a ts range).
+    """
+    global _last_ts
+    ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if ts <= _last_ts:
+        base = datetime.fromisoformat(_last_ts.replace("Z", "+00:00"))
+        ts = (base + timedelta(milliseconds=1)).isoformat().replace("+00:00", "Z")
+    _last_ts = ts
+    return ts
 
 
 @dataclass
