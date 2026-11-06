@@ -105,6 +105,53 @@ class TraceStore:
                 return event.session
         return None
 
+    def find_latest_session(
+        self,
+        *,
+        channel: str = "",
+        user: str = "",
+        project: str = "",
+        alias: str = "",
+        days: int = 90,
+        max_idle_hours: float = 0.0,
+    ) -> Optional[str]:
+        """Resume thread from traces: newest session matching channel/user/project.
+
+        With ``max_idle_hours > 0``, a session whose last event is older than
+        that many hours ago is not resumed (caller mints a fresh thread).
+        """
+        last_ts_by_session: dict[str, str] = {}
+        for event in self.iter_events(files=self.list_trace_files(days=days)):
+            if not event.session:
+                continue
+            md = event.metadata if isinstance(event.metadata, dict) else {}
+            if channel and str(md.get("channel") or "") != channel:
+                continue
+            if user and str(md.get("user") or "") != str(user):
+                continue
+            if project and str(md.get("project") or "") != project:
+                continue
+            if alias:
+                ev_alias = str(md.get("alias") or "")
+                if ev_alias and ev_alias != alias:
+                    continue
+            prev = last_ts_by_session.get(event.session, "")
+            if event.ts >= prev:
+                last_ts_by_session[event.session] = event.ts
+        if not last_ts_by_session:
+            return None
+        sid, last_ts = max(last_ts_by_session.items(), key=lambda item: item[1])
+        if max_idle_hours > 0 and last_ts:
+            try:
+                last_dt = datetime.fromisoformat(str(last_ts).replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                idle = (now - last_dt).total_seconds() / 3600.0
+                if last_dt.date() != now.date() and idle >= max_idle_hours:
+                    return None
+            except Exception:
+                pass
+        return sid
+
     def get_recent_errors(self, limit: int = 10, session_id: Optional[str] = None) -> List[TraceEvent]:
         """Get the most recent N errors (newest first)."""
         errors: List[TraceEvent] = []

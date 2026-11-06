@@ -3,7 +3,7 @@
 ## Architecture Principles
 - **Zero Heavy Dependencies**: Pure Python standard library + `mcp>=1.0.0,<2`. No vector DBs, no Docker, no external daemons.
 - **Append-Only JSONL**: Daily files `~/.agents/traces/YYYY-MM-DD.jsonl`. The one rewrite is `drop_sessions`: ingested product-jsonl twins of live MCP tool calls. Conversation bodies stay in the product folder, never markdown memory.
-- **Identity directory**: `~/.agents/identity.json` maps aliases → user → active session. Not traces, not markdown. DID later.
+- **Identity directory**: `~/.agents/identity.json` maps aliases → `u_…` only. Thread resume: `TraceStore.find_latest_session(channel, user, project)`. Human profile: `USER.md`. Crypto: `agents-keys`.
 - **Sub-0.05ms Append**: Direct atomic file append with zero lock contention.
 
 ## Commands
