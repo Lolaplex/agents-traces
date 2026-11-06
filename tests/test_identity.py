@@ -147,3 +147,44 @@ def test_recent_traced_session_across_midnight_does_not_rollover():
             trace_lookup=store.find_latest_session,
         )
         assert resolved.session.id == "ses_recent"
+
+
+def test_stale_rollover_records_trace_link_and_assemble_continues():
+    # End-to-end: stale traced session → fresh mint with prev_session +
+    # rollover event → assemble pulls the previous session's messages.
+    import os
+    from datetime import datetime, timezone, timedelta
+    from unittest.mock import patch
+    from agents_traces.assemble import assemble_messages
+    from agents_traces.models import TraceEvent
+
+    with tempfile.TemporaryDirectory() as tmp:
+        live = Path(tmp) / "live"
+        live.mkdir()
+        store = TraceStore(traces_dir=live)
+        old = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat().replace("+00:00", "Z")
+        store.append(
+            TraceEvent(
+                session="ses_old",
+                type="message",
+                ts=old,
+                metadata={
+                    "role": "user",
+                    "content": "earlier context",
+                    "channel": "repl",
+                    "user": "fabian",
+                },
+            )
+        )
+        ident = IdentityStore(Path(tmp) / "identity.json")
+        with patch.dict(os.environ, {"AGENTS_TRACES_DIR": str(live)}):
+            resolved = ident.resolve(
+                channel="repl",
+                user="fabian",
+                trace_lookup=store.find_latest_session,
+            )
+            assert resolved.session.id != "ses_old"
+            assert resolved.session.prev_session == "ses_old"
+
+            msgs = assemble_messages(resolved.session.id, limit=24)
+            assert any("earlier context" in (m["content"] or "") for m in msgs)

@@ -33,7 +33,14 @@ class TraceStore:
         return self.traces_dir / f"{d.strftime('%Y-%m-%d')}.jsonl"
 
     def append(self, event: TraceEvent) -> None:
-        """Ultra-fast atomic-like append to daily trace file."""
+        """Ultra-fast atomic-like append to daily trace file.
+
+        Strings over the inline cap are spilled to content-addressed artifacts
+        before the line is written. Short events take the same single append.
+        """
+        from .content import spill_overflow
+
+        spill_overflow(self.traces_dir, event)
         # Extract target date from event timestamp if possible, fallback to today
         target_date: Optional[date] = None
         if event.ts:
@@ -48,8 +55,17 @@ class TraceStore:
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(line)
 
-    def list_trace_files(self, days: Optional[int] = None) -> List[Path]:
-        """Return sorted list of jsonl trace files (newest first)."""
+    def list_trace_files(
+        self,
+        days: Optional[int] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+    ) -> List[Path]:
+        """Return sorted jsonl trace files (newest first).
+
+        ``days`` keeps files whose date stem is within the last N UTC days.
+        ``start`` and ``end`` are inclusive ``YYYY-MM-DD`` bounds on that stem.
+        """
         if not self.traces_dir.exists():
             return []
         
@@ -61,6 +77,12 @@ class TraceStore:
         if days is not None and days > 0:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
             files = [p for p in files if p.stem >= cutoff]
+        if start:
+            start_day = start[:10]
+            files = [p for p in files if p.stem >= start_day]
+        if end:
+            end_day = end[:10]
+            files = [p for p in files if p.stem <= end_day]
         return files
 
     def iter_events(
@@ -241,6 +263,7 @@ class TraceStore:
                 tmp = path.with_suffix(".jsonl.tmp")
                 tmp.write_text("".join(kept), encoding="utf-8")
                 tmp.replace(path)
+        self.prune_unreferenced_content()
         return dropped
 
     def cleanup_old_traces(self, keep_days: int = 30, compress: bool = False) -> int:
@@ -260,4 +283,11 @@ class TraceStore:
                 else:
                     p.unlink()
                 count += 1
+        self.prune_unreferenced_content()
         return count
+
+    def prune_unreferenced_content(self) -> int:
+        """Drop content artifacts that no remaining trace file names."""
+        from .content import prune_unreferenced
+
+        return prune_unreferenced(self.traces_dir)

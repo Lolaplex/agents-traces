@@ -1,7 +1,7 @@
 <h1 align="center">.agents / traces</h1>
 
 <p align="center">
-  <a href="https://github.com/Lolaplex/agents-traces/releases"><img src="https://img.shields.io/badge/version-0.1.0-blue.svg?style=flat-square" alt="Version 0.1.0"></a>
+  <a href="https://github.com/Lolaplex/agents-traces/releases"><img src="https://img.shields.io/badge/version-0.1.1-blue.svg?style=flat-square" alt="Version 0.1.1"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-Standard-orange.svg?style=flat-square" alt="MCP"></a>
   <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10+-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+"></a>
   <a href="https://pypi.org/project/agents-traces/"><img src="https://img.shields.io/pypi/v/agents-traces.svg?style=flat-square" alt="PyPI"></a>
@@ -75,13 +75,14 @@ Primary surface. Agents diagnose a failed loop here.
 | `record_trace` | Append one event |
 | `ingest_traces` | Pull IDE transcripts into the daily files |
 | `session_snap` | Recent user messages in the traces store |
-| `session_grep` | Search those messages |
+| `session_grep` | Search those messages. Optional `since` / `until` date or timestamp |
+| `read_content` | Fetch full text by session and digest. Offset/limit window, digest checked |
 | `session_tail` | Last lines for one session, or the latest |
 | `trace_seal` | Cryptographically seal tool calls into a SHA-256 hash chain |
 | `trace_verify` | Verify cryptographic integrity of a sealed hash chain |
 | `trace_audit` | Audit for non-determinism, redundant calls, and scope violations |
 
-Twelve tools. Full contract: [`abi/MCP.md`](abi/MCP.md).
+Thirteen tools. Full contract: [`abi/MCP.md`](abi/MCP.md). A host may call `read_content` as an optional backend; this package does not import or require a host.
 
 ---
 
@@ -99,6 +100,7 @@ Ops / install / batch. Machine-readable catalog: `python -m agents_traces --help
 | `agents-traces tail [-n N] [-f] [--raw]` | End of today's file. `-f` follows |
 | `agents-traces record …` | Append one event from a shell |
 | `agents-traces assemble --session ID [--limit N] [--days N] [--include-tools]` | Rebuild chat messages for that session |
+| `agents-traces read --session ID --digest HEX [--offset N] [--limit N] [--json]` | Fetch retained text; digest is checked |
 | `agents-traces ingest` | IDE transcripts → daily JSONL |
 | `agents-traces cleanup [--keep-days N] [--compress]` | Delete old files, or gzip them |
 | `agents-traces seal [session\|file] [-o out]` | Seal tool calls into SHA-256 hash chain |

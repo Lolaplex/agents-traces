@@ -32,9 +32,13 @@ Copy recent IDE transcripts (Antigravity, Cursor, Claude, Cline) into the daily 
 
 Recent user messages from this store (live MCP events and ingested chats). Not agents-memory.
 
-### `session_grep(pattern, since="")`
+### `session_grep(pattern, since="", until="")`
 
-Search those messages. `since` is optional.
+Search those messages. `since` and `until` are optional ISO timestamps or `YYYY-MM-DD` (that whole UTC day). Daily files outside the window are not opened. Text that spilled to a content artifact is included.
+
+### `read_content(session_id, digest, offset=0, limit=-1)`
+
+Fetch one retained message or tool body. `digest` is the 12-character `<ref digest>` value or the full 64-character SHA-256. The stored bytes are hashed before the slice is returned. `offset` is a character index. `limit` < 0 reads through the end; `limit` >= 0 caps the window. The JSON includes `total_chars` and `truncated`. A bad hash returns `{"error": "digest_mismatch", ...}`. Unknown digest returns `{"error": "not_found", ...}`.
 
 ### `session_tail(session_id="", limit=10)`
 
@@ -51,3 +55,22 @@ Cryptographically verify the integrity of a sealed SHA-256 hash chain JSONL file
 ### `trace_audit(session_id=None, path=None, allowed_tools=None)`
 
 Audit a session or JSONL transcript for non-determinism, redundant calls, and scope violations.
+
+## Optional host backend
+
+A host can resolve `<ref digest="...">` without this package importing the host. Skipping the call leaves the host independent of traces.
+
+```python
+from agents_traces import read_content, DigestMismatchError, ContentNotFoundError
+
+piece = read_content(session_id, digest, offset=0, limit=8000)
+# piece.text, piece.total_chars, piece.digest, piece.truncated, piece.stored_truncated
+```
+
+`piece.digest` is the SHA-256 of the full body. Page with `offset + len(piece.text)`.
+
+Shell, no import:
+
+```bash
+agents-traces read --session ses_… --digest <digest> --offset 0 --limit 8000 --json
+```

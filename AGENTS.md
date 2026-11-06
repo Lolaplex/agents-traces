@@ -12,5 +12,5 @@
 - Test CLI stats: `python -m agents_traces stats`
 - Ingest vendor chats: `python -m agents_traces ingest` (Cursor / Antigravity / Claude product jsonl → traces; bodies stay in the product folder)
 - Assemble the agent: `python -m agents_traces assemble --session ses_…` (or legacy `telegram-123`)
-- Session reads: MCP `session_snap` / `session_grep` / `session_tail` (and `session_view.py`) read traces, not product jsonl
+- Session reads: MCP `session_snap` / `session_grep` / `session_tail` (and `session_view.py`) read traces, not product jsonl. `read_content` resolves a `<ref digest>` to the retained body (offset/limit, digest checked)
 - Start FastMCP: `python -m agents_traces serve`

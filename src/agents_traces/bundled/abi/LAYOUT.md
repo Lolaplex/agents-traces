@@ -12,10 +12,15 @@ The location can be overridden at runtime by setting the `AGENTS_TRACES_DIR` env
 
 ```
 ~/.agents/traces/
+├── content/
+│   └── ab/
+│       └── ab…64hex        # Full UTF-8 body, named by its SHA-256
 ├── 2026-08-18.jsonl.gz     # Compressed archive of older traces
 ├── 2026-08-19.jsonl        # Yesterday's trace log
 └── 2026-08-20.jsonl        # Today's active append-only trace log
 ```
+
+`content/` holds bodies that do not fit in a JSONL field (see SCHEMA). The file name is the SHA-256 of the bytes. `cleanup` deletes artifacts that no remaining `.jsonl` or `.jsonl.gz` file mentions.
 
 ## Rotation Rules
 - Daily Partitioning: Each UTC day automatically starts a new file named `YYYY-MM-DD.jsonl`.

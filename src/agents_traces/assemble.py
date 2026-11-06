@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .content import content_sha256, load_retained
 from .identity import alias_id, legacy_session_id
 from .models import TraceEvent
-from .prompt import HISTORY_CHARS, PREVIEW_CHARS, collapse_old_stdio, content_digest, preview_text, stamp_content
+from .prompt import HISTORY_CHARS, PREVIEW_CHARS, collapse_old_stdio, preview_text, stamp_content
 from .store import TraceStore
 
 
@@ -24,12 +25,10 @@ def _meta(event: TraceEvent) -> dict[str, Any]:
     return event.metadata if isinstance(event.metadata, dict) else {}
 
 
-def _render_content(event: TraceEvent) -> str:
-    md = _meta(event)
-    text = str(md.get("content") or md.get("prompt") or "").strip()
-    refs = md.get("binary_refs") or []
+def _binary_suffix(event: TraceEvent) -> str:
+    refs = _meta(event).get("binary_refs") or []
     if not isinstance(refs, list):
-        refs = []
+        return ""
     bits = []
     for ref in refs:
         if not isinstance(ref, dict):
@@ -38,9 +37,15 @@ def _render_content(event: TraceEvent) -> str:
         media = ref.get("media_type") or ref.get("type") or "application/octet-stream"
         if path:
             bits.append(f"[binary path={path} type={media}]")
-    if bits:
-        extra = " ".join(bits)
-        return f"{text}\n{extra}".strip() if text else extra
+    return " ".join(bits)
+
+
+def _message_body(event: TraceEvent, store: Optional[TraceStore] = None) -> str:
+    """Exact stored message text. The ref digest is this string, not a render."""
+    md = _meta(event)
+    text = str(md.get("content") or md.get("prompt") or "")
+    if store is not None:
+        text = load_retained(store.traces_dir, text, md, "")
     return text
 
 
@@ -69,6 +74,15 @@ def _fit_newest(
     return acc
 
 
+def _prev_session_from_traces(session: str, store: TraceStore) -> str:
+    """Newest rollover link for a session, recorded by IdentityStore.resolve."""
+    for e in store.iter_events(session_id=session, event_type="rollover"):
+        md = e.metadata if isinstance(e.metadata, dict) else {}
+        if md.get("prev_session"):
+            return str(md["prev_session"])  # iter is newest-file-first
+    return ""
+
+
 def assemble_messages(
     session: str,
     *,
@@ -89,6 +103,18 @@ def assemble_messages(
         for e in target.iter_events(files=files, session_id=session)
         if e.type == "message" or e.type == "frame" or (include_tools and e.type == "tool_call")
     ]
+    if len(all_events) < limit and store is None:
+        try:
+            prev_sid = _prev_session_from_traces(session, target)
+            if prev_sid:
+                prev_events = [
+                    e
+                    for e in target.iter_events(files=files, session_id=prev_sid)
+                    if e.type == "message" or e.type == "frame" or (include_tools and e.type == "tool_call")
+                ]
+                all_events = prev_events + all_events
+        except Exception:
+            pass
     all_events.sort(key=lambda e: e.ts or "")
 
     # Compaction frames replace the events they cover (see frames.py).
@@ -119,15 +145,22 @@ def assemble_messages(
             role = str(_meta(event).get("role") or "user").lower()
             if role not in ("user", "assistant", "system", "tool"):
                 role = "user"
-            content = _render_content(event)
-            if not content:
+            body = _message_body(event, target)
+            suffix = _binary_suffix(event)
+            if not body.strip() and not suffix:
                 continue
-            content = preview_text(
-                content,
-                session=session,
-                ts=event.ts or "",
-                max_chars=PREVIEW_CHARS,
+            content = (
+                preview_text(
+                    body,
+                    session=session,
+                    ts=event.ts or "",
+                    max_chars=PREVIEW_CHARS,
+                )
+                if body
+                else ""
             )
+            if suffix:
+                content = f"{content}\n{suffix}" if content else suffix
             content = stamp_content(event.ts or "", content)
             out.append({"role": role, "content": content})
         elif include_tools and event.type == "tool_call":
@@ -147,11 +180,13 @@ def assemble_messages(
                 }
             )
             if result is not None:
+                inline = result if isinstance(result, str) else str(result)
+                full_result = load_retained(target.traces_dir, inline, _meta(event), "result_")
                 out.append(
                     {
                         "role": "tool",
                         "content": preview_text(
-                            str(result),
+                            full_result,
                             session=session,
                             ts=event.ts or "",
                             max_chars=PREVIEW_CHARS,
@@ -175,12 +210,21 @@ def record_message(
     binary_refs: Optional[list[dict[str, str]]] = None,
     origin: str = "live",
 ) -> TraceEvent:
-    """Append one chat turn. Provenance of who engaged lives on the event."""
+    """Append one chat turn. Provenance of who engaged lives on the event.
+
+    The full text is kept. Bodies over the inline cap leave a prefix on the
+    event plus digest, sha256, chars, and truncated; the tail is an artifact.
+    ``digest`` is always the hash of the full text.
+    """
     target = store or TraceStore()
+    body = content or ""
+    sha = content_sha256(body)
     metadata: dict[str, Any] = {
         "role": role,
-        "content": content[:20000],
-        "digest": content_digest(content[:20000]),
+        "content": body,
+        "digest": sha[:12],
+        "sha256": sha,
+        "chars": len(body),
         "source": channel or "local",
     }
     if project:

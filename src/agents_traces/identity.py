@@ -93,6 +93,7 @@ class SessionRecord:
     start_date: str
     created_at: str = ""
     last_active: str = ""
+    prev_session: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -103,6 +104,8 @@ class SessionRecord:
         }
         if self.last_active:
             d["last_active"] = self.last_active
+        if self.prev_session:
+            d["prev_session"] = self.prev_session
         return d
 
     @classmethod
@@ -113,6 +116,7 @@ class SessionRecord:
             start_date=str(data.get("start_date") or today_utc()),
             created_at=str(data.get("created_at") or ""),
             last_active=str(data.get("last_active") or ""),
+            prev_session=str(data.get("prev_session") or ""),
         )
 
 
@@ -229,16 +233,37 @@ class IdentityStore:
                 trace_lookup = TraceStore().find_latest_session
             except ImportError:
                 return None
-        sid = trace_lookup(
-            channel=channel,
-            user=str(user),
-            project=project,
-            alias=alias,
-            max_idle_hours=max_idle_hours,
-        )
+        try:
+            sid = trace_lookup(
+                channel=channel,
+                user=str(user),
+                project=project,
+                alias=alias,
+                max_idle_hours=max_idle_hours,
+            )
+        except TypeError:
+            sid = trace_lookup(
+                channel=channel, user=str(user), project=project, alias=alias
+            )
         if not sid:
             return None
         return SessionRecord(id=sid, user="", start_date=today_utc(), created_at="")
+
+    def _record_rollover(self, session_id: str, prev_session: str) -> None:
+        """Persist the rollover link as a trace event (best effort)."""
+        try:
+            from .models import TraceEvent
+            from .store import TraceStore
+
+            TraceStore().append(
+                TraceEvent(
+                    session=session_id,
+                    type="rollover",
+                    metadata={"prev_session": prev_session},
+                )
+            )
+        except Exception:
+            pass
 
     def _user_id_from_traces(self, session_id: str) -> str:
         try:
@@ -316,6 +341,29 @@ class IdentityStore:
                 alias=alias,
                 legacy=not traced.id.startswith("ses_"),
             )
+
+        # Not resumed: either nothing traced yet, or the traced session was
+        # stale. If it was stale, link the fresh mint to it — the rollover is
+        # recorded as a trace event so context continuity survives without a
+        # session store.
+        stale = (
+            self._session_from_traces(
+                channel=channel,
+                user=user,
+                project=project,
+                alias=alias,
+                trace_lookup=trace_lookup,
+                max_idle_hours=0.0,
+            )
+            if max_idle_hours > 0
+            else None
+        )
+        if stale is not None:
+            rec = self._mint_session(person)
+            rec.prev_session = stale.id
+            self._record_rollover(rec.id, stale.id)
+            self.save()
+            return Resolved(user=person, session=rec, alias=alias)
 
         if alias and channel and str(user).strip():
             old = legacy_session_id(channel, user)

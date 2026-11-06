@@ -14,10 +14,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from hashlib import sha256
 from typing import Any
 from xml.sax.saxutils import escape
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from .content import content_digest, content_sha256
 
 
 @dataclass
@@ -148,18 +149,34 @@ def clock_message(
     }
 
 
-PREVIEW_CHARS = 768
-HISTORY_CHARS = 24000
+PREVIEW_CHARS = 1600
+HISTORY_CHARS = 32000
 # Last tool *round* (consecutive role=tool after one assistant) keeps a preview.
 # Earlier large stdio is stubbed in place. Small results stay (errors, "ok").
 KEEP_RECENT_STDIO_ROUNDS = 1
 STDIO_KEEP_CHARS = 256
 _DIGEST_RE = re.compile(r'digest="([a-f0-9]+)"')
+_SHA_RE = re.compile(r'sha256="([a-f0-9]{64})"')
 _CHARS_RE = re.compile(r'chars="(\d+)"')
 
 
-def content_digest(text: str) -> str:
-    return sha256((text or "").encode("utf-8")).hexdigest()[:12]
+def truncation_ref(
+    digest: str,
+    chars: int,
+    *,
+    sha256: str = "",
+    session: str = "",
+    ts: str = "",
+) -> str:
+    """Explicit address for a truncated body: digest, full hash, original length."""
+    attrs = [f'digest="{digest}"', f'chars="{int(chars)}"', 'truncated="1"']
+    if sha256:
+        attrs.insert(1, f'sha256="{sha256}"')
+    if session:
+        attrs.append(f'session="{_e(session)}"')
+    if ts:
+        attrs.append(f'ts="{_e(ts)}"')
+    return f"<ref {' '.join(attrs)}/>"
 
 
 def preview_text(
@@ -171,20 +188,18 @@ def preview_text(
 ) -> str:
     """Bounded prompt projection. Full body stays in traces. Not a summary.
 
-    The <ref> is a frozen address (digest of the stored bytes). It does not
-    change on later turns, so it does not rewrite that message.
+    The <ref> is a frozen address (digest of the full text, original length,
+    truncated=1). It does not change on later turns, so it does not rewrite
+    that message. Resolve it with read_content(session, digest).
     """
     raw = text or ""
-    digest = content_digest(raw)
+    full = content_sha256(raw)
+    digest = full[:12]
     if len(raw) <= max_chars:
         return raw
     head = raw[:max_chars].rstrip()
-    attrs = [f'digest="{digest}"', f'chars="{len(raw)}"']
-    if session:
-        attrs.append(f'session="{_e(session)}"')
-    if ts:
-        attrs.append(f'ts="{_e(ts)}"')
-    return f"{head}\n<ref {' '.join(attrs)}/>"
+    ref = truncation_ref(digest, len(raw), sha256=full, session=session, ts=ts)
+    return f"{head}\n{ref}"
 
 
 def stdio_stub(text: str) -> str:
@@ -198,9 +213,12 @@ def stdio_stub(text: str) -> str:
         return raw
     found = _DIGEST_RE.search(raw)
     digest = found.group(1) if found else content_digest(raw)
+    found_sha = _SHA_RE.search(raw)
+    sha = found_sha.group(1) if found_sha else ""
     found_n = _CHARS_RE.search(raw)
     n = int(found_n.group(1)) if found_n else len(raw)
-    return f'<stdio evicted="1" digest="{digest}" chars="{n}"/>'
+    sha_attr = f' sha256="{sha}"' if sha else ""
+    return f'<stdio evicted="1" truncated="1" digest="{digest}"{sha_attr} chars="{n}"/>'
 
 
 def _tool_round_ranges(messages: list[dict[str, Any]]) -> list[list[int]]:

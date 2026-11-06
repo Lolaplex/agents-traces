@@ -1,6 +1,6 @@
 """
 CLI entry point for agents-trace.
-Commands: init, stats, inspect, sessions, tail, record, assemble, cleanup, ingest, serve, skills, sync-mcp
+Commands: init, stats, inspect, sessions, tail, record, assemble, read, cleanup, ingest, serve, skills, sync-mcp
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from .cli_help import emit_help_json
 from .models import TraceEvent
 from .stats import compute_model_breakdown, compute_stats, format_model_breakdown_text, format_stats_text
 from .store import TraceStore
-from .sync import merge_agent_mcp, sync_skills
+from .sync import merge_agent_mcp, sync_always_on_files, sync_host_rules, sync_skills
 from .timeline import render_timeline
 
 
@@ -189,6 +189,47 @@ def cmd_record(args: argparse.Namespace, store: TraceStore) -> None:
     print(f"\033[32m✓ Recorded event to {store.get_date_file_path().name}\033[0m")
 
 
+def cmd_read(args: argparse.Namespace, store: TraceStore) -> int:
+    """Print retained message or tool text addressed by digest."""
+    from .content import ContentError, read_content
+
+    try:
+        piece = read_content(
+            args.session,
+            args.digest,
+            offset=args.offset,
+            limit=args.limit,
+            store=store,
+        )
+    except ContentError as exc:
+        payload = {"error": exc.code, "message": str(exc), "digest": args.digest}
+        if getattr(args, "json", False):
+            print(json.dumps(payload))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        payload = {"error": "bad_request", "message": str(exc)}
+        if getattr(args, "json", False):
+            print(json.dumps(payload))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(piece.to_dict(), ensure_ascii=False))
+    else:
+        if piece.truncated:
+            print(
+                f"window {len(piece.text)} chars at offset {piece.offset} of {piece.total_chars} "
+                f"(digest {piece.digest_short})",
+                file=sys.stderr,
+            )
+        sys.stdout.write(piece.text)
+        if not piece.text.endswith("\n"):
+            sys.stdout.write("\n")
+    return 0
+
+
 def cmd_cleanup(args: argparse.Namespace, store: TraceStore) -> None:
     """Clean up old trace files."""
     count = store.cleanup_old_traces(keep_days=args.keep_days, compress=args.compress)
@@ -324,8 +365,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
-    # init
-    subparsers.add_parser("init", help="Plug & Play setup: auto-configure MCP in all IDEs and sync skills")
+    # init / sync
+    subparsers.add_parser("init", help="Plug & Play setup: auto-configure rules, MCP, and skills in all IDEs")
+    p_sync = subparsers.add_parser("sync", help="Auto-configure rules, MCP, and skills across all IDEs")
+    p_sync.add_argument("--init", action="store_true", help="Alias for full Plug & Play setup")
 
     # stats
     p_stats = subparsers.add_parser("stats", help="Display token, cost and tool statistics")
@@ -382,6 +425,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_assemble.add_argument("--limit", type=int, default=24, help="Max turns")
     p_assemble.add_argument("--days", type=int, default=30, help="Trace files to scan")
     p_assemble.add_argument("--include-tools", action="store_true")
+
+    p_read = subparsers.add_parser(
+        "read",
+        help="Read retained message or tool content by digest",
+    )
+    p_read.add_argument("--session", required=True, help="Session id (trace: prefix optional)")
+    p_read.add_argument("--digest", required=True, help="12-char ref digest or full SHA-256")
+    p_read.add_argument("--offset", type=int, default=0, help="Character offset into the full text")
+    p_read.add_argument("--limit", type=int, default=None, help="Max characters (default: through the end)")
+    p_read.add_argument("--json", action="store_true", help="Print the verified window as JSON")
 
     # compact (typed frame over older events; raw stays in the store)
     p_compact = subparsers.add_parser(
@@ -461,15 +514,19 @@ def main(argv: list[str] | None = None) -> int:
 
     store = TraceStore()
 
-    if args.command == "init":
+    if args.command in ("init", "sync"):
         print("=== Initializing agents-traces (Plug & Play) ===\n")
+        rules_res = sync_host_rules()
+        always_on_res = sync_always_on_files()
+        print(f"1. Synced {len(rules_res)} always-apply rules and {len(always_on_res)} global instruction files.")
+
         synced = sync_skills()
-        print(f"1. Synced {len(synced)} agent skills:")
+        print(f"\n2. Synced {len(synced)} agent skills:")
         for s in synced:
             print(f"   * {s}")
 
         mcp_res = merge_agent_mcp()
-        print(f"\n2. Auto-configured MCP servers in {len(mcp_res)} IDE config files:")
+        print(f"\n3. Auto-configured MCP servers in {len(mcp_res)} IDE config files:")
         for r in mcp_res:
             print(f"   * {r}")
 
@@ -509,6 +566,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps({"session": args.session, "messages": msgs}, ensure_ascii=False, indent=2))
         return 0
+    elif args.command == "read":
+        return cmd_read(args, store)
     elif args.command == "compact":
         from .frames import compact_session
 
