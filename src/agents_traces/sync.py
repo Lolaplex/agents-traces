@@ -13,6 +13,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
+from agents_workspace import Workspace
+
 SKILLS = ["trace-inspect", "trace-stats"]
 
 MARKER = "<!-- agents-traces-sync -->"
@@ -26,10 +28,7 @@ ALWAYS_ON_BODY = """# Execution Observability (`agents-traces`)
 
 
 def _agents_home() -> Path:
-    env = os.environ.get("AGENTS_HOME")
-    if env:
-        return Path(env).expanduser()
-    return Path.home() / ".agents"
+    return Workspace.from_env().root
 
 
 def mcp_entry() -> Dict[str, Any]:

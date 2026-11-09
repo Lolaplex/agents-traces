@@ -13,6 +13,7 @@ authors = [{ name = "Lolaplex" }]
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0,<2",
+    "agents-workspace>=0.1.0,<1",
 ]
 keywords = ["mcp", "agents", "traces", "trace", "observability", "metrics", "logging", "coding-assistant", "cursor", "claude", "antigravity"]
 classifiers = [

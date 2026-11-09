@@ -8,15 +8,14 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Set
 
+from agents_workspace import Workspace
+
 from .models import TraceEvent
 
 
 def get_default_traces_dir() -> Path:
-    """Get the traces directory, checking environment variable or defaulting to ~/.agents/traces."""
-    env_dir = os.environ.get("AGENTS_TRACES_DIR")
-    if env_dir:
-        return Path(env_dir).expanduser().resolve()
-    return Path.home() / ".agents" / "traces"
+    """Traces directory from the workspace (AGENTS_TRACES_DIR wins)."""
+    return Workspace.from_env().traces
 
 
 class TraceStore:

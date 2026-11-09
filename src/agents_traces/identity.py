@@ -19,12 +19,11 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from agents_workspace import Workspace
+
 
 def default_identity_path() -> Path:
-    override = os.environ.get("AGENTS_IDENTITY_PATH", "").strip()
-    if override:
-        return Path(override)
-    return Path.home() / ".agents" / "identity.json"
+    return Workspace.from_env().identity
 
 
 DEFAULT_PATH = default_identity_path()
