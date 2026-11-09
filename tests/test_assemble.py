@@ -38,6 +38,21 @@ def test_assemble_rebuilds_chat_completions_payload():
         assert "image/png" in msgs[2]["content"]
 
 
+def test_assemble_widens_window_for_sparse_session():
+    # Resumed session whose events predate the days=30 scan window
+    # (long-idle user, ingested archive) must still assemble.
+    with tempfile.TemporaryDirectory() as tmp:
+        store = TraceStore(traces_dir=tmp)
+        sid = session_id_for("telegram", "8315191211")
+        record_message(
+            sid, "user", "old memory", store=store, channel="telegram", user="8315191211"
+        )
+        daily = store.list_trace_files(days=1)[0]
+        daily.rename(daily.with_name("2020-01-01.jsonl"))
+        msgs = assemble_messages(sid, store=store, limit=10)
+        assert any("old memory" in m["content"] for m in msgs)
+
+
 def test_assemble_projects_preview_not_full_body():
     with tempfile.TemporaryDirectory() as tmp:
         store = TraceStore(traces_dir=tmp)

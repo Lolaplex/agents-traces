@@ -98,11 +98,22 @@ def assemble_messages(
     """
     target = store or TraceStore()
     files = target.list_trace_files(days=days)
+    wanted = {"message", "frame"} | ({"tool_call"} if include_tools else set())
     all_events = [
         e
         for e in target.iter_events(files=files, session_id=session)
-        if e.type == "message" or e.type == "frame" or (include_tools and e.type == "tool_call")
+        if e.type in wanted
     ]
+    if len(all_events) < limit and days is not None:
+        # Sparse recent history: a resumed session can hold older events
+        # outside the scan window (long-idle user, ingested archives).
+        # Output stays bounded by limit; only the file scan widens.
+        files = target.list_trace_files()
+        all_events = [
+            e
+            for e in target.iter_events(files=files, session_id=session)
+            if e.type in wanted
+        ]
     if len(all_events) < limit and store is None:
         try:
             prev_sid = _prev_session_from_traces(session, target)
