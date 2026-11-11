@@ -4,9 +4,9 @@ An alias is how a device names you (`telegram:5712`, `repl:local`).
 A user is the person those aliases resolve to (stable `u_…` until DID binds).
 A session is a conversation thread (`ses_…`) — **resume from traces**, not identity.
 
-Human profile (name, work, prefs) lives in `~/.agents/memory/USER.md`.
-Crypto identity lives in `~/.agents/keys/` (`did:key`).
-This file is alias bindings only (`~/.agents/identity.json`).
+Human profile (name, work, prefs) lives in the workspace memory `USER.md`.
+Crypto identity lives on the host in `<host>/keys/` (`did:key`, agents-keys).
+This file is alias bindings only (`<host>/users.json`, resolved per call).
 """
 
 from __future__ import annotations
@@ -22,11 +22,15 @@ from typing import Any, Callable, Optional
 from agents_workspace import Workspace
 
 
-def default_identity_path() -> Path:
-    return Workspace.from_env().identity
+def default_identity_path(workspace: "Workspace | None" = None) -> Path:
+    return (workspace or Workspace.from_env()).identity
 
 
-DEFAULT_PATH = default_identity_path()
+def __getattr__(name: str):
+    if name == "DEFAULT_PATH":
+        # Compatibility: resolved per access, never frozen at import.
+        return default_identity_path()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def alias_id(channel: str, user: str | int) -> str:
@@ -128,8 +132,12 @@ class Resolved:
 
 
 class IdentityStore:
-    def __init__(self, path: Path | str | None = None):
-        self.path = Path(path) if path else default_identity_path()
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        workspace: "Workspace | None" = None,
+    ):
+        self.path = Path(path) if path else default_identity_path(workspace)
         self._users: dict[str, UserRecord] = {}
         self._loaded = False
 
