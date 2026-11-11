@@ -6,7 +6,7 @@ No subcommand prints today's stats. It does not start the MCP server.
 
 ## Subcommands
 
-- `agents-traces init` — create `~/.agents/traces/`, copy `trace-inspect` and `trace-stats`, merge MCP into host configs whose directories already exist.
+- `agents-traces init` — create `<ws>/traces/`, copy `trace-inspect` and `trace-stats`, merge MCP into host configs whose directories already exist.
 - `agents-traces stats [--date YYYY-MM-DD | --days N] [--by-model] [--json]` — tokens, cost, tool rates. There is no `--today` flag.
 - `agents-traces analyze-models [--days N] [--json]` — per-model breakdown. Default window is 7 days.
 - `agents-traces inspect [session_id]` — terminal timeline. Omit the id for the latest session.

@@ -19,7 +19,7 @@
 pip install agents-traces && agents-traces init
 ```
 
-Creates `~/.agents/traces/`, copies skills, and merges MCP into host configs whose directories already exist.
+Creates `<ws>/traces/`, copies skills, and merges MCP into host configs whose directories already exist.
 
 > [!TIP]
 > **🤖 Agent-Driven Setup:**
@@ -31,7 +31,7 @@ Source checkouts can also be installed and managed with [vand](https://github.co
 
 ## What it does
 
-Each UTC day is one append-only file: `~/.agents/traces/YYYY-MM-DD.jsonl` (override `AGENTS_TRACES_DIR`). No daemon, no database. Append is a file write.
+Each UTC day is one append-only file: `<ws>/traces/YYYY-MM-DD.jsonl` (override `AGENTS_TRACES_DIR`). No daemon, no database. Append is a file write.
 
 **Inspect.** MCP reads the same files an agent just wrote: timeline, recent errors, token and cost totals, per-model failure rates.
 
@@ -56,7 +56,7 @@ Bare `agents-traces` (no subcommand) prints today's stats. The MCP server is `se
 | Layer | What you get | Who |
 | --- | --- | --- |
 | **JSONL + MCP/CLI** | Record, inspect, stats, assemble | Any MCP host / any shell |
-| **Autowire on init** | Merge `agents-traces` into the host MCP file when that config directory already exists; copy `trace-inspect` and `trace-stats` | Cursor, Claude Desktop, Zed (`context_servers`), Antigravity / Gemini, Windsurf, Codex, Roo, Cline. Skills land in `~/.agents/skills`, `~/.cursor/skills`, `~/.gemini/config/skills` |
+| **Autowire on init** | Merge `agents-traces` into the host MCP file when that config directory already exists; copy `trace-inspect` and `trace-stats` | Cursor, Claude Desktop, Zed (`context_servers`), Antigravity / Gemini, Windsurf, Codex, Roo, Cline. Skills land in `<ws>/skills`, `~/.cursor/skills`, `~/.gemini/config/skills` |
 
 **MCP without autowire:** point the host at `python -m agents_traces serve`.
 
