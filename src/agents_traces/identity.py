@@ -209,6 +209,15 @@ class SessionStore:
         return sorted(e.name for e in root.iterdir()
                       if e.is_dir() and (e / "sessions").is_dir())
 
+    def delete(self, session_id: str, persona: str = "") -> bool:
+        personas = [persona] if persona else self._persona_ids()
+        for p in personas:
+            path = self._path(p, session_id)
+            if path.is_file():
+                path.unlink()
+                return True
+        return False
+
     def list(self, persona: str = "", user: str = "") -> list[SessionRecord]:
         out: list[SessionRecord] = []
         for p in ([persona] if persona else self._persona_ids()):

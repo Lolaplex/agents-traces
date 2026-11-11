@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `SessionStore.delete(session_id, persona)` removes a session record file (used by the relay `DELETE .../sessions/<s>` route).
 - Trace events now carry `workspace` + `persona` in metadata (C201 contract): `record_message` accepts `workspace=`/`persona=` kwargs with `AGENTS_WORKSPACE`/`AGENTS_PERSONA` env fallback; `append_trace` stamps tool-call events from the child env the loop pins.
 
 ### Changed
