@@ -4,14 +4,14 @@
 
 By default, all traces are stored in:
 ```
-~/.agents/traces/
+<ws>/traces/
 ```
 The location can be overridden at runtime by setting the `AGENTS_TRACES_DIR` environment variable.
 
 ## File Hierarchy
 
 ```
-~/.agents/traces/
+<ws>/traces/
 ├── content/
 │   └── ab/
 │       └── ab…64hex        # Full UTF-8 body, named by its SHA-256

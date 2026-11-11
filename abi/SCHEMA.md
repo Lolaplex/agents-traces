@@ -1,6 +1,6 @@
 # Event Schema Specification
 
-Every trace event in `~/.agents/traces/YYYY-MM-DD.jsonl` is a single JSON object.
+Every trace event in `<ws>/traces/YYYY-MM-DD.jsonl` is a single JSON object.
 
 ## Common Fields
 
