@@ -1,4 +1,5 @@
 """C201: SessionRecord keyed by workspace+user+persona, stored under the persona."""
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,6 +73,45 @@ class PersonaSessions(unittest.TestCase):
         self.assertEqual(len(sessions.list(persona="cos")), 1)
         self.assertEqual(len(sessions.list(persona="ops")), 1)
         self.assertEqual(len(sessions.list()), 2)
+
+    def test_message_event_stamps_workspace_persona(self):
+        """C201 contract: trace events carry workspace + persona."""
+        from agents_traces.assemble import record_message
+        from agents_traces.store import TraceStore
+
+        store = IdentityStore(workspace=self.ws)
+        res = store.resolve(channel="repl", user="me", persona="cos",
+                            new_session=True)
+        ts = TraceStore()
+        ts._root = self.ws.traces
+        ev = record_message(res.session.id, "user", "hi",
+                            channel="repl", user="me",
+                            workspace=res.session.workspace,
+                            persona=res.session.persona, store=ts)
+        self.assertEqual(ev.metadata["workspace"], res.session.workspace)
+        self.assertEqual(ev.metadata["persona"], "cos")
+
+    def test_tool_call_event_stamps_env_context(self):
+        from agents_traces import interceptor
+
+        events = []
+        old_env = dict(os.environ)
+        try:
+            os.environ["AGENTS_HOST_DIR"] = str(self.host.dir)
+            os.environ["AGENTS_WORKSPACE"] = self.ws.id
+            os.environ["AGENTS_PERSONA"] = "cos"
+            os.environ["AGENTS_TRACES_DIR"] = str(self.ws.traces)
+            store = interceptor.get_global_store()
+            old_append = store.append
+            store.append = events.append
+            interceptor.append_trace(tool="mcp.x", session="ses_t1")
+        finally:
+            store.append = old_append
+            os.environ.clear()
+            os.environ.update(old_env)
+        md = events[0].metadata
+        self.assertEqual(md["workspace"], self.ws.id)
+        self.assertEqual(md["persona"], "cos")
 
 
 if __name__ == "__main__":

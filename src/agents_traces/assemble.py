@@ -7,6 +7,7 @@ vendor folder. Memory holds pointers only. Binaries are referenced, not inlined
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from .content import content_sha256, load_retained
@@ -218,6 +219,8 @@ def record_message(
     user: str = "",
     user_id: str = "",
     project: str = "",
+    workspace: str = "",
+    persona: str = "",
     binary_refs: Optional[list[dict[str, str]]] = None,
     origin: str = "live",
 ) -> TraceEvent:
@@ -248,6 +251,12 @@ def record_message(
         metadata["user"] = str(user)
     if user_id:
         metadata["user_id"] = user_id
+    ws_ref = workspace or os.environ.get("AGENTS_WORKSPACE", "")
+    persona_ref = persona or os.environ.get("AGENTS_PERSONA", "")
+    if ws_ref:
+        metadata["workspace"] = ws_ref
+    if persona_ref:
+        metadata["persona"] = persona_ref
     if project:
         metadata["project"] = project
     if binary_refs:

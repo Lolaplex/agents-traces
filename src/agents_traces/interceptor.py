@@ -89,6 +89,13 @@ def append_trace(
         return
 
     sid = session or os.environ.get("AGENTS_SESSION_ID") or _process_session()
+    metadata = kwargs.pop("metadata", None) or {}
+    ws_ref = os.environ.get("AGENTS_WORKSPACE", "")
+    persona_ref = os.environ.get("AGENTS_PERSONA", "")
+    if ws_ref and "workspace" not in metadata:
+        metadata["workspace"] = ws_ref
+    if persona_ref and "persona" not in metadata:
+        metadata["persona"] = persona_ref
     event = TraceEvent(
         session=sid,
         type=type,
@@ -98,6 +105,7 @@ def append_trace(
         status=status,
         error=error,
         duration_ms=round(duration_ms, 1) if duration_ms is not None else None,
+        metadata=metadata or None,
         **kwargs,
     )
     get_global_store().append(event)

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Trace events now carry `workspace` + `persona` in metadata (C201 contract): `record_message` accepts `workspace=`/`persona=` kwargs with `AGENTS_WORKSPACE`/`AGENTS_PERSONA` env fallback; `append_trace` stamps tool-call events from the child env the loop pins.
+
 ### Changed
 - `.mailmap` maps legacy `Klix`/`Felix Kempf` author names to `Klix927` (no history rewrite; display only).
 
