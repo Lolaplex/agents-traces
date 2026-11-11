@@ -27,7 +27,7 @@ ALWAYS_ON_BODY = """# Execution Observability (`agents-traces`)
 - **Token & Model Telemetry**: Use `get_session_stats` and `get_model_stats` for empirical token/cost/failure-rate metrics across sessions."""
 
 
-def _agents_home() -> Path:
+def _workspace_dir() -> Path:
     return Workspace.from_env().root
 
 
@@ -111,7 +111,7 @@ def zed_config_dir() -> Path:
 def sync_host_rules() -> List[str]:
     """Write ~/.agents/rules/agents-traces.mdc and bind into Cursor, Gemini, Windsurf rules."""
     home = Path.home()
-    agents_rules = _agents_home() / "rules"
+    agents_rules = _workspace_dir() / "rules"
     agents_rules.mkdir(parents=True, exist_ok=True)
     canonical = agents_rules / RULE_FILENAME
     canonical.write_text(rule_text(), encoding="utf-8")
@@ -149,9 +149,9 @@ def _upsert_agents_md(path: Path) -> str:
 def sync_always_on_files() -> List[str]:
     """Splice <!-- agents-traces-sync --> block into global AGENTS.md / CLAUDE.md files."""
     home = Path.home()
-    agents_home = _agents_home()
+    ws_root = _workspace_dir()
     targets = [
-        agents_home / "AGENTS.md",
+        ws_root / "AGENTS.md",
         home / ".gemini" / "config" / "AGENTS.md",
         zed_config_dir() / "AGENTS.md",
         home / ".claude" / "AGENTS.md",
@@ -160,7 +160,7 @@ def sync_always_on_files() -> List[str]:
     for target in targets:
         written.append(_upsert_agents_md(target))
 
-    for pair_dir in (agents_home, home / ".claude"):
+    for pair_dir in (ws_root, home / ".claude"):
         agents_md = pair_dir / "AGENTS.md"
         claude_md = pair_dir / "CLAUDE.md"
         if claude_md.exists() and not claude_md.is_symlink():
@@ -181,7 +181,7 @@ def known_host_mcp_paths() -> List[Path]:
     home = Path.home()
     paths: List[Path] = [
         home / ".cursor" / "mcp.json",
-        _agents_home() / "mcp.json",
+        Workspace.from_env().host.mcp_json,
         home / ".claude.json",
         home / ".claude" / "mcp.json",
         home / ".claude" / "settings.json",
@@ -379,7 +379,7 @@ def sync_skills() -> List[str]:
     home = Path.home()
     targets = [
         home / ".gemini" / "config" / "skills",
-        _agents_home() / "skills",
+        _workspace_dir() / "skills",
         home / ".cursor" / "skills",
         home / ".claude" / "skills",
     ]
