@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `sync.py`: `_agents_home()` -> `_workspace_dir()`; `mcp.json` probe resolves via `host.mcp_json`.
 - Update-check cache resolves under `<host>/cache/updates/` instead of a workspace-root or XDG/home cache.
 - Identity and trace paths resolve per call through `agents_workspace` instead of at import. `identity.DEFAULT_PATH` is now a compatibility attribute computed on each access; `IdentityStore` accepts an explicit `workspace=` and defaults to `Workspace.from_env().identity` (host `users.json`).
 - The interceptor keeps one `TraceStore` per workspace id (`_stores` dict) instead of one global store per process, so live events from two workspaces in one process land in separate trace directories.
