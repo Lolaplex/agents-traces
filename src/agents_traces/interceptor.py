@@ -19,7 +19,7 @@ from .models import TraceEvent
 from .store import TraceStore, get_default_traces_dir
 
 _stores: Dict[str, TraceStore] = {}
-_process_session_id: Optional[str] = None
+_process_sessions: Dict[str, str] = {}
 
 
 def _workspace_key() -> str:
@@ -28,14 +28,17 @@ def _workspace_key() -> str:
 
 
 def _process_session() -> str:
-    """Stable per-process session id — every live event from this process
-    shares it, and different processes never collide."""
-    global _process_session_id
-    if _process_session_id is None:
+    """Stable session id per (workspace, persona) in this process — live
+    events share it, and different ws/persona/process never collide."""
+    persona = os.environ.get("AGENTS_PERSONA", "")
+    key = f"{_workspace_key()}:{persona}"
+    sid = _process_sessions.get(key)
+    if sid is None:
         import uuid
 
-        _process_session_id = f"proc-{uuid.uuid4().hex[:8]}"
-    return _process_session_id
+        sid = f"proc-{uuid.uuid4().hex[:8]}"
+        _process_sessions[key] = sid
+    return sid
 
 
 def is_tracing_enabled() -> bool:

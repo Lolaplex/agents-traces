@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `SessionRecord` keyed by workspace + user + persona (`workspace`, `persona`, `channel`, `workdir` fields). Session ids are `ses_<ULID>` (sortable ULID, D-session-id). New `SessionStore` persists records under `<ws>/personas/<persona>/sessions/<id>.json`; sessions are created only via API resolve paths. `resolve()` takes `persona`/`workdir` and lands unknown or legacy sessions on the workspace's first persona (`default`). Interceptor process session is keyed by (workspace, persona) so two personas in one workspace keep separate live sessions.
+
 ### Changed
 - README + abi/LAYOUT.md describe the workspace store `<ws>/traces` and `<ws>/skills`; no `~/.agents` paths outside migration notes.
 

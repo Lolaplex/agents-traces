@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -20,6 +21,20 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from agents_workspace import Workspace
+
+_ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def mint_ulid() -> str:
+    """ULID: 48-bit ms timestamp + 80-bit randomness, Crockford base32."""
+    ts_ms = int(time.time() * 1000)
+    rand = int.from_bytes(os.urandom(10), "big")
+    value = (ts_ms << 80) | rand
+    chars = []
+    for _ in range(26):
+        chars.append(_ULID_ALPHABET[value & 31])
+        value >>= 5
+    return "".join(reversed(chars))
 
 
 def default_identity_path(workspace: "Workspace | None" = None) -> Path:
@@ -54,7 +69,8 @@ def legacy_session_id(channel: str, user: str | int) -> str:
 
 
 def mint_session_id() -> str:
-    return "ses_" + uuid.uuid4().hex[:12]
+    """``ses_<ULID>``: kind prefix plus sortable ULID body (D-session-id)."""
+    return "ses_" + mint_ulid()
 
 
 def mint_user_id() -> str:
@@ -91,9 +107,18 @@ class UserRecord:
 
 @dataclass
 class SessionRecord:
+    """A conversation thread keyed by workspace + user + persona.
+
+    Sessions live under ``<ws>/personas/<persona>/sessions/<id>.json`` and
+    are created only via API/CLI resolve paths - never implicitly by reads.
+    """
     id: str
     user: str
     start_date: str
+    workspace: str = ""
+    persona: str = ""
+    channel: str = ""
+    workdir: str = ""
     created_at: str = ""
     last_active: str = ""
     prev_session: str = ""
@@ -105,10 +130,11 @@ class SessionRecord:
             "start_date": self.start_date,
             "created_at": self.created_at,
         }
-        if self.last_active:
-            d["last_active"] = self.last_active
-        if self.prev_session:
-            d["prev_session"] = self.prev_session
+        for key in ("workspace", "persona", "channel", "workdir",
+                    "last_active", "prev_session"):
+            value = getattr(self, key)
+            if value:
+                d[key] = value
         return d
 
     @classmethod
@@ -117,6 +143,10 @@ class SessionRecord:
             id=str(data["id"]),
             user=str(data.get("user") or ""),
             start_date=str(data.get("start_date") or today_utc()),
+            workspace=str(data.get("workspace") or ""),
+            persona=str(data.get("persona") or ""),
+            channel=str(data.get("channel") or ""),
+            workdir=str(data.get("workdir") or ""),
             created_at=str(data.get("created_at") or ""),
             last_active=str(data.get("last_active") or ""),
             prev_session=str(data.get("prev_session") or ""),
@@ -131,13 +161,90 @@ class Resolved:
     legacy: bool = False
 
 
+class SessionStore:
+    """Session records under ``<ws>/personas/<persona>/sessions/<id>.json``.
+
+    Keyed by (workspace, persona, user). Legacy sessions land on the
+    workspace's first persona (`default`) - the first created, not a
+    privileged one.
+    """
+
+    def __init__(self, workspace: "Workspace | None" = None):
+        self.ws = workspace or Workspace.from_env()
+
+    def _dir(self, persona: str) -> Path:
+        return self.ws.personas / persona / "sessions"
+
+    def _path(self, persona: str, session_id: str) -> Path:
+        return self._dir(persona) / f"{session_id}.json"
+
+    def put(self, rec: SessionRecord, persona: str = "") -> SessionRecord:
+        p = persona or rec.persona or self.ws.default_persona or "default"
+        rec.persona = p
+        rec.workspace = rec.workspace or self.ws.id
+        path = self._path(p, rec.id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(rec.to_dict(), indent=2) + "\n",
+                       encoding="utf-8")
+        os.replace(tmp, path)
+        return rec
+
+    def get(self, session_id: str, persona: str = "") -> Optional[SessionRecord]:
+        personas = [persona] if persona else self._persona_ids()
+        for p in personas:
+            path = self._path(p, session_id)
+            if path.is_file():
+                try:
+                    return SessionRecord.from_dict(
+                        json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, json.JSONDecodeError):
+                    continue
+        return None
+
+    def _persona_ids(self) -> list[str]:
+        root = self.ws.personas
+        if not root.is_dir():
+            return []
+        return sorted(e.name for e in root.iterdir()
+                      if e.is_dir() and (e / "sessions").is_dir())
+
+    def list(self, persona: str = "", user: str = "") -> list[SessionRecord]:
+        out: list[SessionRecord] = []
+        for p in ([persona] if persona else self._persona_ids()):
+            d = self._dir(p)
+            if not d.is_dir():
+                continue
+            for f in sorted(d.glob("*.json")):
+                try:
+                    rec = SessionRecord.from_dict(
+                        json.loads(f.read_text(encoding="utf-8")))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if user and rec.user != user:
+                    continue
+                out.append(rec)
+        return out
+
+
+def resolve_persona(explicit: str = "", workspace: "Workspace | None" = None) -> str:
+    """Persona for a new session: explicit > AGENTS_PERSONA > ws default."""
+    pick = (explicit or "").strip() or os.environ.get("AGENTS_PERSONA", "").strip()
+    if pick:
+        return pick
+    ws = workspace or Workspace.from_env()
+    return ws.default_persona or "default"
+
+
 class IdentityStore:
     def __init__(
         self,
         path: Path | str | None = None,
         workspace: "Workspace | None" = None,
     ):
-        self.path = Path(path) if path else default_identity_path(workspace)
+        self.ws = workspace or Workspace.from_env()
+        self.ws_id = self.ws.id
+        self.path = Path(path) if path else default_identity_path(self.ws)
         self._users: dict[str, UserRecord] = {}
         self._loaded = False
 
@@ -192,12 +299,17 @@ class IdentityStore:
             self.save()
         return user
 
-    def _mint_session(self, user: UserRecord) -> SessionRecord:
+    def _mint_session(self, user: UserRecord, *, persona: str = "",
+                      channel: str = "", workdir: str = "") -> SessionRecord:
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         return SessionRecord(
             id=mint_session_id(),
             user=user.id,
             start_date=today_utc(),
+            workspace=self.ws_id,
+            persona=persona,
+            channel=channel,
+            workdir=workdir,
             created_at=now,
             last_active=now,
         )
@@ -292,6 +404,8 @@ class IdentityStore:
         user: str | int = "",
         user_id: str = "",
         session: str = "",
+        persona: str = "",
+        workdir: str = "",
         new_session: bool = False,
         project: str = "",
         legacy_exists: Optional[Callable[[str], bool]] = None,
@@ -304,16 +418,27 @@ class IdentityStore:
             raise ValueError("channel+user, user_id, or session is required")
 
         self._ensure()
+        sessions = SessionStore(self.ws)
+        persona_id = resolve_persona(persona, self.ws)
 
         if session and session.lower() not in ("new", "new_session"):
             trace_uid = self._user_id_from_traces(session)
             person = self._ensure_user(alias=alias, user_id=user_id or trace_uid)
-            rec = SessionRecord(
+            existing = sessions.get(session)
+            rec = existing or SessionRecord(
                 id=session,
                 user=person.id,
                 start_date=today_utc(),
+                workspace=self.ws_id,
+                # an unknown session lands on the first persona: it was the
+                # first created, not a privileged default
+                persona=persona_id,
+                channel=channel,
+                workdir=workdir,
                 created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             )
+            if not existing:
+                sessions.put(rec)
             if alias and alias not in person.aliases:
                 person.aliases.append(alias)
             self.save()
@@ -327,7 +452,9 @@ class IdentityStore:
         person = self._ensure_user(alias=alias, user_id=user_id)
 
         if new_session or session.lower() in ("new", "new_session"):
-            rec = self._mint_session(person)
+            rec = sessions.put(
+                self._mint_session(person, persona=persona_id,
+                                   channel=channel, workdir=workdir))
             self.save()
             return Resolved(user=person, session=rec, alias=alias)
 
@@ -341,6 +468,14 @@ class IdentityStore:
         )
         if traced is not None:
             traced.user = person.id
+            existing = sessions.get(traced.id)
+            if existing:
+                traced = existing
+            else:
+                traced.workspace = self.ws_id
+                traced.persona = persona_id
+                traced.channel = channel
+                sessions.put(traced)
             self.save()
             return Resolved(
                 user=person,
@@ -366,9 +501,11 @@ class IdentityStore:
             else None
         )
         if stale is not None:
-            rec = self._mint_session(person)
+            rec = self._mint_session(person, persona=persona_id,
+                                     channel=channel, workdir=workdir)
             rec.prev_session = stale.id
             self._record_rollover(rec.id, stale.id)
+            sessions.put(rec)
             self.save()
             return Resolved(user=person, session=rec, alias=alias)
 
@@ -376,11 +513,18 @@ class IdentityStore:
             old = legacy_session_id(channel, user)
             exists = bool(legacy_exists(old)) if legacy_exists is not None else False
             if exists:
-                rec = SessionRecord(id=old, user=person.id, start_date=today_utc(), created_at="")
+                # legacy channel-user thread migrates onto the first persona
+                rec = SessionRecord(
+                    id=old, user=person.id, start_date=today_utc(),
+                    workspace=self.ws_id, persona=persona_id,
+                    channel=channel, workdir=workdir, created_at="")
+                sessions.put(rec)
                 self.save()
                 return Resolved(user=person, session=rec, alias=alias, legacy=True)
 
-        rec = self._mint_session(person)
+        rec = sessions.put(
+            self._mint_session(person, persona=persona_id,
+                               channel=channel, workdir=workdir))
         self.save()
         return Resolved(user=person, session=rec, alias=alias)
 
