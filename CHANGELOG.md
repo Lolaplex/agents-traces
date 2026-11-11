@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Identity and trace paths resolve per call through `agents_workspace` instead of at import. `identity.DEFAULT_PATH` is now a compatibility attribute computed on each access; `IdentityStore` accepts an explicit `workspace=` and defaults to `Workspace.from_env().identity` (host `users.json`).
+- The interceptor keeps one `TraceStore` per workspace id (`_stores` dict) instead of one global store per process, so live events from two workspaces in one process land in separate trace directories.
+
 ### Added
 - Content-addressed artifacts under `content/<sha256[:2]>/<sha256>` keep the full UTF-8 text of message bodies, tool results, errors, and stacks. Daily JSONL stays bounded at 20,000 characters.
 - Truncated records store `truncated`, `chars` (original length), `digest` (12-hex SHA-256 prefix), and `sha256`. Prompt `<ref>` and `<stdio>` markers include `truncated="1"` plus that digest and length.

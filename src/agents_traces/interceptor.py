@@ -13,11 +13,18 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from agents_workspace import Workspace
+
 from .models import TraceEvent
 from .store import TraceStore, get_default_traces_dir
 
-_global_store: Optional[TraceStore] = None
+_stores: Dict[str, TraceStore] = {}
 _process_session_id: Optional[str] = None
+
+
+def _workspace_key() -> str:
+    ws = Workspace.from_env()
+    return ws.id or str(get_default_traces_dir())
 
 
 def _process_session() -> str:
@@ -39,10 +46,13 @@ def is_tracing_enabled() -> bool:
 
 
 def get_global_store() -> TraceStore:
-    global _global_store
-    if _global_store is None:
-        _global_store = TraceStore()
-    return _global_store
+    """Trace store for the current workspace (one instance per workspace id)."""
+    key = _workspace_key()
+    store = _stores.get(key)
+    if store is None:
+        store = TraceStore()
+        _stores[key] = store
+    return store
 
 
 def _result_text(res: Any) -> Optional[str]:

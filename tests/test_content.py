@@ -114,7 +114,7 @@ def test_ranged_tool_result_and_interceptor(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENTS_TRACES_DIR", str(tmp_path))
     import agents_traces.interceptor as interceptor
 
-    interceptor._global_store = None
+    interceptor._stores.clear()
     interceptor._process_session_id = None
     try:
         @interceptor.trace_call
@@ -131,7 +131,7 @@ def test_ranged_tool_result_and_interceptor(monkeypatch, tmp_path):
         loaded = read_content(events[0].session, events[0].metadata["result_digest"], store=store)
         assert loaded.text == body
     finally:
-        interceptor._global_store = None
+        interceptor._stores.clear()
         interceptor._process_session_id = None
 
 
