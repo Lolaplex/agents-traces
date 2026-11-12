@@ -122,6 +122,9 @@ class SessionRecord:
     created_at: str = ""
     last_active: str = ""
     prev_session: str = ""
+    goal: str = ""
+    status: str = ""
+    result: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -131,7 +134,8 @@ class SessionRecord:
             "created_at": self.created_at,
         }
         for key in ("workspace", "persona", "channel", "workdir",
-                    "last_active", "prev_session"):
+                    "last_active", "prev_session",
+                    "goal", "status", "result"):
             value = getattr(self, key)
             if value:
                 d[key] = value
@@ -150,6 +154,9 @@ class SessionRecord:
             created_at=str(data.get("created_at") or ""),
             last_active=str(data.get("last_active") or ""),
             prev_session=str(data.get("prev_session") or ""),
+            goal=str(data.get("goal") or ""),
+            status=str(data.get("status") or ""),
+            result=str(data.get("result") or ""),
         )
 
 
