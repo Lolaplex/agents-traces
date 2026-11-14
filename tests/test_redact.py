@@ -322,6 +322,31 @@ def test_extra_pattern_scans_past_chunk_and_border():
     assert out.endswith("END")
 
 
+def test_long_extra_match_across_window_is_replaced_once():
+    from agents_traces.redact import _EXTRA_CHUNK
+
+    redactor = Redactor(use_env=False, extra_patterns=[r"tok_[A-Za-z0-9]+"])
+    for length in (201, 500, 4097, 9000):
+        token = "tok_" + ("A" * (length - 4))
+        assert len(token) == length
+        start = _EXTRA_CHUNK - 10
+        text = ("." * start) + token + "!"
+        assert start < _EXTRA_CHUNK < start + len(token)
+        out = redactor.redact_text(text)
+        assert out == ("." * start) + REDACTED + "!"
+        assert token not in out
+        assert out.count(REDACTED) == 1
+
+    token = "tok_" + ("B" * 496)
+    start = _EXTRA_CHUNK - 8
+    text = ("你" * start) + token + "終"
+    assert start < _EXTRA_CHUNK < start + len(token)
+    out = redactor.redact_text(text)
+    assert out == ("你" * start) + REDACTED + "終"
+    assert token not in out
+    assert out.count(REDACTED) == 1
+
+
 def test_quantified_alternation_is_skipped():
     redactor = Redactor(use_env=False, extra_patterns=[r"(a|aa)+", r"widget-\d{6}"])
     text = ("a" * 32) + " widget-123456"

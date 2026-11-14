@@ -15,15 +15,16 @@ alone (``password: use a manager``). A value that is not prose
 (``hunter2``, a token) is still removed.
 
 Extra patterns are regular expressions. Each match is replaced in full.
-The whole text is scanned, in 8192-character windows that overlap by 4096,
-which is also the longest match an extra pattern may replace. A match is
-recorded once. Patterns that nest quantifiers, quantify an alternation
-(``(a|aa)+``), repeat an unbounded dot, match the empty string, or are
-longer than 200 characters are skipped and not logged. If the third-party
-``regex`` module is installed, each window has a timeout. ``re`` is the
-fallback and has no timeout. ``AGENTS_TRACE_REDACT=0`` turns the default
-redactor off. ``AGENTS_TRACE_REDACT_EXTRA`` is a JSON array of pattern
-strings.
+The whole text is scanned in 8192-character windows that overlap by 4096.
+A match that reaches a window edge, or runs past that overlap, is completed
+with ``pattern.match`` on the full text so the real end is kept. There is
+no maximum replaced length. One span is kept per start. Patterns that nest
+quantifiers, quantify an alternation (``(a|aa)+``), repeat an unbounded
+dot, match the empty string, or are longer than 200 characters are skipped
+and not logged. If the third-party ``regex`` module is installed, each
+window and each completion has a timeout. ``re`` is the fallback and has
+no timeout. ``AGENTS_TRACE_REDACT=0`` turns the default redactor off.
+``AGENTS_TRACE_REDACT_EXTRA`` is a JSON array of pattern strings.
 """
 
 from __future__ import annotations
@@ -38,8 +39,8 @@ from .models import TraceEvent
 
 REDACTED = "[redacted]"
 _MAX_EXTRA_PATTERN = 200
-# Windows cover the whole text. Overlap is the longest extra-pattern match
-# that is replaced; a longer span is ignored so a window cannot cut it in half.
+# Windows only locate match starts. Overlap is how far the next window
+# reaches back; a match that hits the window edge is completed on the full text.
 _EXTRA_CHUNK = 8192
 _EXTRA_OVERLAP = 4096
 _REGEX_TIMEOUT = 0.05
@@ -468,57 +469,88 @@ def _compile_list(patterns: Sequence[str], *, strict: bool) -> tuple[Any, ...]:
     return tuple(compiled)
 
 
+def _is_timeout(exc: BaseException) -> bool:
+    return isinstance(exc, TimeoutError) or type(exc).__name__ == "TimeoutError"
+
+
 def _finditer(pattern: Any, text: str) -> Any:
     if _uses_regex(pattern):
         return pattern.finditer(text, timeout=_REGEX_TIMEOUT)
     return pattern.finditer(text)
 
 
-def _sub_extra(pattern: Any, text: str, replacement: str) -> str:
-    """Replace matches of one extra pattern across the whole text.
+def _match_at(pattern: Any, text: str, pos: int) -> Any:
+    """Match ``pattern`` anchored at ``pos`` in the full string."""
+    if _uses_regex(pattern):
+        return pattern.match(text, pos, timeout=_REGEX_TIMEOUT)
+    return pattern.match(text, pos)
 
-    Windows are ``_EXTRA_CHUNK`` characters and overlap by ``_EXTRA_OVERLAP``.
-    A match is kept only when it starts in the window's non-overlapping
-    prefix (the last window keeps every start) and is no longer than the
-    overlap, so a span cannot be cut by the window edge or recorded twice.
+
+def _sub_extra(pattern: Any, text: str, replacement: str) -> str:
+    """Replace every match of one extra pattern. Nothing past a window is left raw.
+
+    Windows of ``_EXTRA_CHUNK`` overlap by ``_EXTRA_OVERLAP`` so a start near
+    an edge is still seen. A match that reaches the window end, or is longer
+    than the overlap, is re-matched with ``pattern.match(text, start)`` and
+    the true end is kept. Truncated slices are not stored. One span per start.
+    If that re-match times out, the span still runs from the start through
+    the end of the current window.
     """
     if not text:
         return text
     step = _EXTRA_CHUNK - _EXTRA_OVERLAP
     if step < 1:
         step = 1
-    spans: list[tuple[int, int]] = []
+    found: dict[int, int] = {}
     n = len(text)
-    start = 0
-    try:
-        while start < n:
-            end = min(n, start + _EXTRA_CHUNK)
-            last = end == n
-            for match in _finditer(pattern, text[start:end]):
-                if match.end() <= match.start():
+    win = 0
+    while win < n:
+        end = min(n, win + _EXTRA_CHUNK)
+        chunk = text[win:end]
+        try:
+            matches = list(_finditer(pattern, chunk))
+        except Exception as exc:
+            if _is_timeout(exc):
+                if end == n:
+                    break
+                win += step
+                continue
+            raise
+        for match in matches:
+            if match.end() <= match.start():
+                continue
+            abs_start = win + match.start()
+            abs_end = win + match.end()
+            touches_end = end < n and match.end() == len(chunk)
+            too_long = (match.end() - match.start()) > _EXTRA_OVERLAP
+            if touches_end or too_long:
+                try:
+                    full = _match_at(pattern, text, abs_start)
+                except Exception as exc:
+                    if not _is_timeout(exc):
+                        raise
+                    abs_end = max(abs_end, end)
+                    previous = found.get(abs_start)
+                    if previous is None or abs_end > previous:
+                        found[abs_start] = abs_end
                     continue
-                length = match.end() - match.start()
-                if length > _EXTRA_OVERLAP:
+                if full is not None and full.end() > abs_start:
+                    abs_end = full.end()
+                elif touches_end:
                     continue
-                if not last and match.start() >= step:
-                    continue
-                spans.append((start + match.start(), start + match.end()))
-            if last:
-                break
-            start += step
-    except TimeoutError:
-        return text
-    except Exception as exc:
-        if type(exc).__name__ == "TimeoutError":
-            return text
-        raise
-    if not spans:
+            previous = found.get(abs_start)
+            if previous is None or abs_end > previous:
+                found[abs_start] = abs_end
+        if end == n:
+            break
+        win += step
+    if not found:
         return text
     parts: list[str] = []
     prev = 0
     last_end = 0
-    for span_start, span_end in sorted(set(spans)):
-        if span_start < last_end:
+    for span_start, span_end in sorted(found.items()):
+        if span_end <= span_start or span_start < last_end:
             continue
         parts.append(text[prev:span_start])
         parts.append(replacement)
