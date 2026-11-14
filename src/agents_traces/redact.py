@@ -7,12 +7,21 @@ assigned to an environment name that marks it secret (``GITHUB_TOKEN``,
 ``OPENAI_API_KEY``, ``MAX_TOKENS`` is not one of those).
 
 The stored text keeps the surrounding words. The value becomes
-``[REDACTED]``. Digests are recomputed from that text so ``read_content``
+``[redacted]``. Digests are recomputed from that text so ``read_content``
 matches the bytes on disk.
 
+An unquoted assignment whose value is an ordinary dictionary word is left
+alone (``password: use a manager``). A value that is not prose
+(``hunter2``, a token) is still removed.
+
 Extra patterns are regular expressions. Each match is replaced in full.
-``AGENTS_TRACE_REDACT=0`` turns the default redactor off.
-``AGENTS_TRACE_REDACT_EXTRA`` is a JSON array of extra patterns.
+Patterns that nest quantifiers, repeat an unbounded dot, match the empty
+string, or are longer than 200 characters are skipped and not logged.
+Only the first 65536 characters are scanned. If the third-party ``regex``
+module is installed, each extra pattern also has a timeout. ``re`` is the
+fallback and has no timeout. ``AGENTS_TRACE_REDACT=0`` turns the default
+redactor off. ``AGENTS_TRACE_REDACT_EXTRA`` is a JSON array of pattern
+strings.
 """
 
 from __future__ import annotations
@@ -25,7 +34,15 @@ from typing import Any, Optional, Sequence
 from .content import content_sha256
 from .models import TraceEvent
 
-REDACTED = "[REDACTED]"
+REDACTED = "[redacted]"
+_MAX_EXTRA_PATTERN = 200
+_MAX_EXTRA_INPUT = 65536
+_REGEX_TIMEOUT = 0.05
+
+try:
+    import regex as _regex_mod
+except ImportError:  # optional; stdlib re has no timeout
+    _regex_mod = None
 
 _ENV_DISABLE = frozenset({"0", "false", "no", "off", "disabled"})
 _HARD_PARTS = frozenset(
@@ -111,8 +128,9 @@ _COLON = re.compile(
 )
 
 # (pattern, require a digit somewhere in the match).
-# Digit gate keeps ``sk-implementation-details`` and other prose intact.
-# Fixed vendor prefixes that are already unambiguous skip the gate.
+# Variable-length prefixes keep the digit gate so ``sk-implementation-details``
+# stays. Fixed-prefix and fixed-length shapes do not: ``ghp_`` plus 36
+# letters is still a token.
 _TOKEN_SPECS: tuple[tuple[re.Pattern[str], bool], ...] = (
     (
         re.compile(
@@ -127,7 +145,7 @@ _TOKEN_SPECS: tuple[tuple[re.Pattern[str], bool], ...] = (
     ),
     (
         re.compile(r"(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36}(?![A-Za-z0-9])"),
-        True,
+        False,
     ),
     (
         re.compile(r"(?<![A-Za-z0-9])glpat-[A-Za-z0-9_\-]{20,}(?![A-Za-z0-9_\-])"),
@@ -153,7 +171,7 @@ _TOKEN_SPECS: tuple[tuple[re.Pattern[str], bool], ...] = (
     ),
     (
         re.compile(r"(?<![A-Za-z0-9])AIza[0-9A-Za-z_\-]{35}(?![A-Za-z0-9_\-])"),
-        True,
+        False,
     ),
     (
         re.compile(
@@ -167,7 +185,7 @@ _TOKEN_SPECS: tuple[tuple[re.Pattern[str], bool], ...] = (
     ),
     (
         re.compile(r"(?<![A-Za-z0-9])npm_[A-Za-z0-9]{36}(?![A-Za-z0-9])"),
-        True,
+        False,
     ),
     (
         re.compile(r"(?<![A-Za-z0-9])gsk_[A-Za-z0-9]{20,}(?![A-Za-z0-9])"),
@@ -175,7 +193,7 @@ _TOKEN_SPECS: tuple[tuple[re.Pattern[str], bool], ...] = (
     ),
     (
         re.compile(r"(?<![A-Za-z0-9])SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}(?![A-Za-z0-9_\-])"),
-        True,
+        False,
     ),
     (
         re.compile(r"(?<![A-Za-z0-9])pypi-[A-Za-z0-9_\-]{16,}(?![A-Za-z0-9_\-])"),
@@ -254,13 +272,189 @@ def _parse_env_patterns(raw: str) -> list[str]:
     return data
 
 
-def _compile(pattern: str) -> re.Pattern[str]:
-    if not isinstance(pattern, str) or pattern == "":
-        raise ValueError("redaction pattern must be a non-empty string")
+def _uses_regex(pattern: Any) -> bool:
+    return _regex_mod is not None and isinstance(pattern, _regex_mod.Pattern)
+
+
+def _unsafe_quantifiers(source: str) -> bool:
+    """Nested quantifiers, or more than one unbounded ``.*`` / ``.+``."""
+    group_has_quant: list[bool] = []
+    prev_has_quant = False
+    prev_is_atom = False
+    prev_is_dot = False
+    unbounded_dots = 0
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        if ch == "\\":
+            i += 2 if i + 1 < n else 1
+            prev_has_quant = False
+            prev_is_atom = True
+            prev_is_dot = False
+            continue
+        if ch == "[":
+            i += 1
+            if i < n and source[i] == "^":
+                i += 1
+            if i < n and source[i] == "]":
+                i += 1
+            while i < n and source[i] != "]":
+                if source[i] == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                i += 1
+            if i < n:
+                i += 1
+            prev_has_quant = False
+            prev_is_atom = True
+            prev_is_dot = False
+            continue
+        if ch == "(":
+            group_has_quant.append(False)
+            prev_has_quant = False
+            prev_is_atom = False
+            prev_is_dot = False
+            i += 1
+            if i < n and source[i] == "?":
+                i += 1
+                if i + 1 < n and source[i] == "P" and source[i + 1] == "<":
+                    i += 2
+                    while i < n and source[i] != ">":
+                        i += 1
+                    if i < n:
+                        i += 1
+                else:
+                    while i < n and source[i] not in ":)":
+                        i += 1
+                    if i < n and source[i] == ":":
+                        i += 1
+            continue
+        if ch == ")":
+            inner = group_has_quant.pop() if group_has_quant else False
+            prev_has_quant = inner
+            prev_is_atom = True
+            prev_is_dot = False
+            i += 1
+            continue
+        if ch == "{":
+            end = source.find("}", i + 1)
+            body = source[i + 1 : end] if end != -1 else ""
+            if end != -1 and re.fullmatch(r"\d+(,\d*)?", body):
+                if prev_has_quant or not prev_is_atom:
+                    return True
+                prev_has_quant = True
+                prev_is_atom = True
+                if group_has_quant:
+                    group_has_quant[-1] = True
+                if prev_is_dot and ("," in body and body.split(",", 1)[1] == ""):
+                    unbounded_dots += 1
+                    if unbounded_dots > 1:
+                        return True
+                prev_is_dot = False
+                i = end + 1
+                continue
+        if ch in "*+?":
+            if ch == "?" and not prev_is_atom:
+                i += 1
+                continue
+            if prev_has_quant or not prev_is_atom:
+                return True
+            if ch in "*+" and prev_is_dot:
+                unbounded_dots += 1
+                if unbounded_dots > 1:
+                    return True
+            prev_has_quant = True
+            prev_is_atom = True
+            prev_is_dot = False
+            if group_has_quant:
+                group_has_quant[-1] = True
+            i += 1
+            continue
+        if ch == ".":
+            prev_has_quant = False
+            prev_is_atom = True
+            prev_is_dot = True
+            i += 1
+            continue
+        prev_has_quant = False
+        prev_is_atom = True
+        prev_is_dot = False
+        i += 1
+    return False
+
+
+def _reject_extra(source: str) -> bool:
+    """True when an extra pattern must not run. The pattern text is not logged."""
+    if len(source) > _MAX_EXTRA_PATTERN:
+        return True
+    return _unsafe_quantifiers(source)
+
+
+def _matches_empty(pattern: Any) -> bool:
     try:
-        return re.compile(pattern)
+        if _uses_regex(pattern):
+            found = pattern.search("", timeout=_REGEX_TIMEOUT)
+        else:
+            found = pattern.search("")
+    except TimeoutError:
+        return True
+    except Exception:
+        return True
+    return found is not None
+
+
+def _compile_one(pattern: str, *, strict: bool) -> Any:
+    """Compile one extra pattern.
+
+    Unsafe patterns are skipped. A pattern that does not compile raises
+    ``ValueError`` when ``strict`` is set (the message does not include the
+    pattern) and is skipped otherwise. Nothing is printed.
+    """
+    if not isinstance(pattern, str) or pattern == "":
+        if strict:
+            raise ValueError("redaction pattern must be a non-empty string")
+        return None
+    if _reject_extra(pattern):
+        return None
+    try:
+        compiled = _regex_mod.compile(pattern) if _regex_mod is not None else re.compile(pattern)
     except re.error as exc:
-        raise ValueError(f"invalid redaction pattern: {pattern}") from exc
+        if strict:
+            raise ValueError("invalid redaction pattern") from exc
+        return None
+    except Exception:
+        if strict:
+            raise ValueError("invalid redaction pattern") from None
+        return None
+    if _matches_empty(compiled):
+        return None
+    return compiled
+
+
+def _compile_list(patterns: Sequence[str], *, strict: bool) -> tuple[Any, ...]:
+    compiled: list[Any] = []
+    for pattern in patterns:
+        item = _compile_one(pattern, strict=strict)
+        if item is not None:
+            compiled.append(item)
+    return tuple(compiled)
+
+
+def _sub_extra(pattern: Any, text: str, replacement: str) -> str:
+    """Apply one extra pattern to a bounded prefix. Timeout when ``regex`` is installed."""
+    if len(text) > _MAX_EXTRA_INPUT:
+        return _sub_extra(pattern, text[:_MAX_EXTRA_INPUT], replacement) + text[_MAX_EXTRA_INPUT:]
+    try:
+        if _uses_regex(pattern):
+            return pattern.sub(replacement, text, timeout=_REGEX_TIMEOUT)
+        return pattern.sub(replacement, text)
+    except TimeoutError:
+        return text
+    except Exception as exc:
+        if type(exc).__name__ == "TimeoutError":
+            return text
+        raise
 
 
 def _norm_key(key: str) -> str:
@@ -339,8 +533,50 @@ def _looks_credential(value: str) -> bool:
     return False
 
 
+# Ordinary dictionary words. An unquoted ``password: use`` is prose, not a
+# credential. The value is one token, so ``password: use a manager`` keeps
+# ``use``. A word not in this set (``abc``, ``hunter2``) is still removed.
+_PROSE_WORDS = frozenset(
+    """
+    a an the and or but if then else of to in on for with at by from as is are
+    was were be been being it its this that these those i you we they he she me
+    my your our their his her not no yes do does did done use used using user
+    users manager managers manage managed management please change changed
+    required require required optional policy policies password passwords
+    secret secrets token tokens key keys value values note notes text word
+    words only just also into over after before about above below between
+    through during without within again further once here there when where why
+    how all each few more most other some such than too very can will should
+    would could may might must need make made see saw get got set let put keep
+    take good new old first last long great little own same right high low
+    small large next early public private strong weak safe best better full
+    sure still back well even much many both under off out up down now so
+    because while which who what whose have has had having say said go going
+    come came want wanted know known think thought look looks like really
+    actually simply thanks thank hello help helpful via per etc example sample
+    enabled disabled missing empty default hidden stored rotated unset blank
+    unknown practice practices workflow workflows material materials string
+    strings field fields memory memories budget characters auth model based
+    role preferences preference handling storage hygiene scanning detection
+    rotation quarterly following current previous next local remote always
+    never often sometimes please using used user manager
+    """.split()
+)
+
+
+def _is_prose_word(value: str) -> bool:
+    """True when ``value`` is one ordinary dictionary word, not a secret."""
+    word = value.strip().strip(".,:;!?)]}")
+    if not word:
+        return False
+    parts = [part for part in re.split(r"[-']", word.lower()) if part]
+    return bool(parts) and all(part in _PROSE_WORDS for part in parts)
+
+
 def _should_wipe(kind: str, value: str, *, explicit: bool, replacement: str) -> bool:
     if not kind or value == "" or value == replacement:
+        return False
+    if not explicit and _is_prose_word(value):
         return False
     if kind == "any":
         return True
@@ -395,8 +631,8 @@ class Redactor:
         self._enabled = enabled
         self.use_env = use_env
         self._env_raw: Optional[str] = None
-        self._env_compiled: tuple[re.Pattern[str], ...] = ()
-        self._extra = tuple(_compile(pattern) for pattern in (extra_patterns or ()))
+        self._env_compiled: tuple[Any, ...] = ()
+        self._extra = _compile_list(extra_patterns or (), strict=True)
 
     def is_enabled(self) -> bool:
         if self._enabled is not None:
@@ -406,16 +642,15 @@ class Redactor:
         return True
 
     def set_extra_patterns(self, patterns: Sequence[str]) -> None:
-        compiled = tuple(_compile(pattern) for pattern in patterns)
-        self._extra = compiled
+        self._extra = _compile_list(patterns, strict=True)
 
-    def _compiled_extras(self) -> tuple[re.Pattern[str], ...]:
+    def _compiled_extras(self) -> tuple[Any, ...]:
         if not self.use_env:
             return self._extra
         raw = os.environ.get("AGENTS_TRACE_REDACT_EXTRA", "")
         if raw == self._env_raw:
             return self._env_compiled + self._extra
-        compiled = tuple(_compile(pattern) for pattern in _parse_env_patterns(raw))
+        compiled = _compile_list(_parse_env_patterns(raw), strict=False)
         self._env_raw = raw
         self._env_compiled = compiled
         return compiled + self._extra
@@ -512,7 +747,7 @@ class Redactor:
             out = self._apply_pairs(out, _ASSIGN)
             out = self._apply_pairs(out, _COLON)
         for pattern in extras:
-            out = pattern.sub(self.replacement, out)
+            out = _sub_extra(pattern, out, self.replacement)
         return out
 
     def redact_obj(self, value: Any, *, key: Optional[str] = None, force: bool = False) -> Any:

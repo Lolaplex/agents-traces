@@ -39,7 +39,7 @@ Each UTC day is one append-only file: `<ws>/traces/YYYY-MM-DD.jsonl` (override `
 
 **Export.** `agents-traces export --session <id> [--format markdown|json]` writes that session's chat (messages, tool calls, compaction frames) from the same files. Bodies are the retained text.
 
-**Redaction.** Append replaces tokens, Authorization values, secret assignments (`password`, `api_key`, `token`, …), and env values whose names mark them secret with `[REDACTED]` before the line or content blob is written. Extra patterns are configuration (`TraceStore(extra_patterns=…)` or `AGENTS_TRACE_REDACT_EXTRA`).
+**Redaction.** Append replaces tokens, Authorization values, secret assignments (`password`, `api_key`, `token`, …), and env values whose names mark them secret with `[redacted]` before the line or content blob is written. An unquoted dictionary word such as `password: use a manager` stays. Extra patterns are configuration (`TraceStore(extra_patterns=…)` or `AGENTS_TRACE_REDACT_EXTRA`, a JSON array of strings). Unsafe extra patterns are skipped and not logged.
 
 **Session text.** `session_snap`, `session_grep`, and `session_tail` search message text in this store. They do not read [agents-memory](https://github.com/Lolaplex/agents-memory).
 

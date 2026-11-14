@@ -118,6 +118,7 @@ def test_false_positives_stay(tmp_path: Path):
         "Basic configuration for the server",
         "Authorization is required for this route",
         "authorization: enabled",
+        "password: use a manager",
         "api_key=example",
         "eyJ",
         "2026-11-14T20:00:00Z",
@@ -138,15 +139,16 @@ def test_false_positives_stay(tmp_path: Path):
 
 def test_explicit_short_secrets_and_env_names(tmp_path: Path):
     redactor = Redactor(use_env=False)
-    assert redactor.redact_text('{"api_key": "example"}') == '{"api_key": "[REDACTED]"}'
-    assert redactor.redact_text("pwd=abc") == "pwd=[REDACTED]"
-    assert redactor.redact_text("GITHUB_TOKEN=abc") == "GITHUB_TOKEN=[REDACTED]"
+    assert redactor.redact_text('{"api_key": "example"}') == '{"api_key": "[redacted]"}'
+    assert redactor.redact_text("pwd=abc") == "pwd=[redacted]"
+    assert redactor.redact_text("GITHUB_TOKEN=abc") == "GITHUB_TOKEN=[redacted]"
     assert redactor.redact_text('OPENAI_API_KEY="supersecretvalue1"') == (
-        'OPENAI_API_KEY="[REDACTED]"'
+        'OPENAI_API_KEY="[redacted]"'
     )
     assert "hunter2" not in redactor.redact_text("note: password: hunter2")
-    assert redactor.redact_text("password: use a manager") == "password: [REDACTED] a manager"
-    assert redactor.redact_text("api_key=examplekey12") == "api_key=[REDACTED]"
+    assert redactor.redact_text("password: use a manager") == "password: use a manager"
+    assert redactor.redact_text("password: manager") == "password: manager"
+    assert redactor.redact_text("api_key=examplekey12") == "api_key=[redacted]"
 
     store = TraceStore(tmp_path, redactor=redactor)
     store.append(
@@ -255,6 +257,74 @@ def test_env_extra_pattern_and_invalid_pattern(tmp_path: Path, monkeypatch: pyte
     with pytest.raises(ValueError):
         broken.append(TraceEvent(session="ses_bad", type="custom", metadata={"note": "x"}))
     assert not list((tmp_path / "broken").glob("*.jsonl"))
+
+
+def test_fixed_length_token_without_digit():
+    redactor = Redactor(use_env=False)
+    token = "ghp_" + ("b" * 36)
+    assert redactor.redact_text(f"see {token} now") == f"see {REDACTED} now"
+    assert redactor.redact_text("sk-implementation-details") == "sk-implementation-details"
+    assert "b" * 36 not in redactor.redact_text(token)
+
+
+def test_extra_pattern_skips_unsafe_without_printing(capsys, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from agents_traces import redact as redact_mod
+
+    redactor = Redactor(
+        use_env=False,
+        extra_patterns=[r"(a+)+b", r".*widget.*\d", r"widget-\d{6}", "w" * 201],
+    )
+    text = ("a" * 24) + "b widget-123456"
+    assert redactor.redact_text(text) == ("a" * 24) + "b [redacted]"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert "(a+)+" not in captured.err
+
+    with pytest.raises(ValueError) as exc:
+        Redactor(use_env=False, extra_patterns=["("])
+    assert "(" not in str(exc.value)
+
+    monkeypatch.setenv("AGENTS_TRACE_REDACT_EXTRA", json.dumps(["(", r"(a+)+", r"widget-\d{6}"]))
+    store = TraceStore(tmp_path)
+    record_message("ses_skip", "user", "id widget-123456 tail", store=store)
+    raw = disk_text(tmp_path)
+    assert "widget-123456" not in raw
+    assert "tail" in raw
+    captured = capsys.readouterr()
+    assert "(" not in captured.err
+    assert "(a+)+" not in captured.err
+
+    long_pat = "widget-123456 " + ("x" * redact_mod._MAX_EXTRA_INPUT)
+    kept = Redactor(use_env=False, extra_patterns=[r"widget-\d{6}"]).redact_text(
+        ("y" * redact_mod._MAX_EXTRA_INPUT) + " widget-123456"
+    )
+    assert "widget-123456" in kept
+    caught = Redactor(use_env=False, extra_patterns=[r"widget-\d{6}"]).redact_text(long_pat)
+    assert "widget-123456" not in caught
+
+
+def test_regex_timeout_leaves_text(monkeypatch: pytest.MonkeyPatch):
+    from agents_traces import redact as redact_mod
+
+    class _Pattern:
+        def search(self, text, timeout=None):
+            return None
+
+        def sub(self, repl, text, timeout=None):
+            assert timeout == redact_mod._REGEX_TIMEOUT
+            raise TimeoutError("slow")
+
+    class _Mod:
+        Pattern = _Pattern
+
+        @staticmethod
+        def compile(source):
+            return _Pattern()
+
+    monkeypatch.setattr(redact_mod, "_regex_mod", _Mod)
+    redactor = Redactor(use_env=False, extra_patterns=[r"widget-\d{6}"])
+    assert redactor.redact_text("widget-123456") == "widget-123456"
 
 
 def test_nested_token_field(tmp_path: Path):
