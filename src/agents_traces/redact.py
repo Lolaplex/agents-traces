@@ -15,10 +15,12 @@ alone (``password: use a manager``). A value that is not prose
 (``hunter2``, a token) is still removed.
 
 Extra patterns are regular expressions. Each match is replaced in full.
-Patterns that nest quantifiers, repeat an unbounded dot, match the empty
-string, or are longer than 200 characters are skipped and not logged.
-Only the first 65536 characters are scanned. If the third-party ``regex``
-module is installed, each extra pattern also has a timeout. ``re`` is the
+The whole text is scanned, in 8192-character windows that overlap by 4096,
+which is also the longest match an extra pattern may replace. A match is
+recorded once. Patterns that nest quantifiers, quantify an alternation
+(``(a|aa)+``), repeat an unbounded dot, match the empty string, or are
+longer than 200 characters are skipped and not logged. If the third-party
+``regex`` module is installed, each window has a timeout. ``re`` is the
 fallback and has no timeout. ``AGENTS_TRACE_REDACT=0`` turns the default
 redactor off. ``AGENTS_TRACE_REDACT_EXTRA`` is a JSON array of pattern
 strings.
@@ -36,7 +38,10 @@ from .models import TraceEvent
 
 REDACTED = "[redacted]"
 _MAX_EXTRA_PATTERN = 200
-_MAX_EXTRA_INPUT = 65536
+# Windows cover the whole text. Overlap is the longest extra-pattern match
+# that is replaced; a longer span is ignored so a window cannot cut it in half.
+_EXTRA_CHUNK = 8192
+_EXTRA_OVERLAP = 4096
 _REGEX_TIMEOUT = 0.05
 
 try:
@@ -277,21 +282,50 @@ def _uses_regex(pattern: Any) -> bool:
 
 
 def _unsafe_quantifiers(source: str) -> bool:
-    """Nested quantifiers, or more than one unbounded ``.*`` / ``.+``."""
+    """Nested quantifiers, quantified alternation, or repeated unbounded dots.
+
+    ``(a+)+`` is nested. ``(a|aa)+`` is one quantifier over an alternation,
+    the same rule as agents-memory: stdlib ``re`` has no match deadline.
+    ``.*a.*`` is two unbounded dots.
+    """
     group_has_quant: list[bool] = []
+    group_has_alt: list[bool] = []
     prev_has_quant = False
+    prev_has_alt = False
     prev_is_atom = False
     prev_is_dot = False
     unbounded_dots = 0
     i = 0
     n = len(source)
+
+    def _atom() -> None:
+        nonlocal prev_has_quant, prev_has_alt, prev_is_atom, prev_is_dot
+        prev_has_quant = False
+        prev_has_alt = False
+        prev_is_atom = True
+        prev_is_dot = False
+
+    def _quantifier(*, unbounded_dot: bool) -> bool:
+        nonlocal prev_has_quant, prev_has_alt, prev_is_atom, prev_is_dot, unbounded_dots
+        if prev_has_alt or prev_has_quant or not prev_is_atom:
+            return True
+        if unbounded_dot:
+            unbounded_dots += 1
+            if unbounded_dots > 1:
+                return True
+        prev_has_quant = True
+        prev_has_alt = False
+        prev_is_atom = True
+        prev_is_dot = False
+        if group_has_quant:
+            group_has_quant[-1] = True
+        return False
+
     while i < n:
         ch = source[i]
         if ch == "\\":
             i += 2 if i + 1 < n else 1
-            prev_has_quant = False
-            prev_is_atom = True
-            prev_is_dot = False
+            _atom()
             continue
         if ch == "[":
             i += 1
@@ -306,13 +340,22 @@ def _unsafe_quantifiers(source: str) -> bool:
                 i += 1
             if i < n:
                 i += 1
+            _atom()
+            continue
+        if ch == "|":
+            if group_has_alt:
+                group_has_alt[-1] = True
             prev_has_quant = False
-            prev_is_atom = True
+            prev_has_alt = False
+            prev_is_atom = False
             prev_is_dot = False
+            i += 1
             continue
         if ch == "(":
             group_has_quant.append(False)
+            group_has_alt.append(False)
             prev_has_quant = False
+            prev_has_alt = False
             prev_is_atom = False
             prev_is_dot = False
             i += 1
@@ -331,8 +374,10 @@ def _unsafe_quantifiers(source: str) -> bool:
                         i += 1
             continue
         if ch == ")":
-            inner = group_has_quant.pop() if group_has_quant else False
-            prev_has_quant = inner
+            inner_quant = group_has_quant.pop() if group_has_quant else False
+            inner_alt = group_has_alt.pop() if group_has_alt else False
+            prev_has_quant = inner_quant
+            prev_has_alt = inner_alt
             prev_is_atom = True
             prev_is_dot = False
             i += 1
@@ -341,45 +386,27 @@ def _unsafe_quantifiers(source: str) -> bool:
             end = source.find("}", i + 1)
             body = source[i + 1 : end] if end != -1 else ""
             if end != -1 and re.fullmatch(r"\d+(,\d*)?", body):
-                if prev_has_quant or not prev_is_atom:
+                unbounded_dot = prev_is_dot and "," in body and body.split(",", 1)[1] == ""
+                if _quantifier(unbounded_dot=unbounded_dot):
                     return True
-                prev_has_quant = True
-                prev_is_atom = True
-                if group_has_quant:
-                    group_has_quant[-1] = True
-                if prev_is_dot and ("," in body and body.split(",", 1)[1] == ""):
-                    unbounded_dots += 1
-                    if unbounded_dots > 1:
-                        return True
-                prev_is_dot = False
                 i = end + 1
                 continue
         if ch in "*+?":
             if ch == "?" and not prev_is_atom:
                 i += 1
                 continue
-            if prev_has_quant or not prev_is_atom:
+            if _quantifier(unbounded_dot=ch in "*+" and prev_is_dot):
                 return True
-            if ch in "*+" and prev_is_dot:
-                unbounded_dots += 1
-                if unbounded_dots > 1:
-                    return True
-            prev_has_quant = True
-            prev_is_atom = True
-            prev_is_dot = False
-            if group_has_quant:
-                group_has_quant[-1] = True
             i += 1
             continue
         if ch == ".":
             prev_has_quant = False
+            prev_has_alt = False
             prev_is_atom = True
             prev_is_dot = True
             i += 1
             continue
-        prev_has_quant = False
-        prev_is_atom = True
-        prev_is_dot = False
+        _atom()
         i += 1
     return False
 
@@ -441,20 +468,64 @@ def _compile_list(patterns: Sequence[str], *, strict: bool) -> tuple[Any, ...]:
     return tuple(compiled)
 
 
+def _finditer(pattern: Any, text: str) -> Any:
+    if _uses_regex(pattern):
+        return pattern.finditer(text, timeout=_REGEX_TIMEOUT)
+    return pattern.finditer(text)
+
+
 def _sub_extra(pattern: Any, text: str, replacement: str) -> str:
-    """Apply one extra pattern to a bounded prefix. Timeout when ``regex`` is installed."""
-    if len(text) > _MAX_EXTRA_INPUT:
-        return _sub_extra(pattern, text[:_MAX_EXTRA_INPUT], replacement) + text[_MAX_EXTRA_INPUT:]
+    """Replace matches of one extra pattern across the whole text.
+
+    Windows are ``_EXTRA_CHUNK`` characters and overlap by ``_EXTRA_OVERLAP``.
+    A match is kept only when it starts in the window's non-overlapping
+    prefix (the last window keeps every start) and is no longer than the
+    overlap, so a span cannot be cut by the window edge or recorded twice.
+    """
+    if not text:
+        return text
+    step = _EXTRA_CHUNK - _EXTRA_OVERLAP
+    if step < 1:
+        step = 1
+    spans: list[tuple[int, int]] = []
+    n = len(text)
+    start = 0
     try:
-        if _uses_regex(pattern):
-            return pattern.sub(replacement, text, timeout=_REGEX_TIMEOUT)
-        return pattern.sub(replacement, text)
+        while start < n:
+            end = min(n, start + _EXTRA_CHUNK)
+            last = end == n
+            for match in _finditer(pattern, text[start:end]):
+                if match.end() <= match.start():
+                    continue
+                length = match.end() - match.start()
+                if length > _EXTRA_OVERLAP:
+                    continue
+                if not last and match.start() >= step:
+                    continue
+                spans.append((start + match.start(), start + match.end()))
+            if last:
+                break
+            start += step
     except TimeoutError:
         return text
     except Exception as exc:
         if type(exc).__name__ == "TimeoutError":
             return text
         raise
+    if not spans:
+        return text
+    parts: list[str] = []
+    prev = 0
+    last_end = 0
+    for span_start, span_end in sorted(set(spans)):
+        if span_start < last_end:
+            continue
+        parts.append(text[prev:span_start])
+        parts.append(replacement)
+        prev = span_end
+        last_end = span_end
+    parts.append(text[prev:])
+    return "".join(parts)
 
 
 def _norm_key(key: str) -> str:

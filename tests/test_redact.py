@@ -295,13 +295,40 @@ def test_extra_pattern_skips_unsafe_without_printing(capsys, monkeypatch: pytest
     assert "(" not in captured.err
     assert "(a+)+" not in captured.err
 
-    long_pat = "widget-123456 " + ("x" * redact_mod._MAX_EXTRA_INPUT)
-    kept = Redactor(use_env=False, extra_patterns=[r"widget-\d{6}"]).redact_text(
-        ("y" * redact_mod._MAX_EXTRA_INPUT) + " widget-123456"
-    )
-    assert "widget-123456" in kept
+    long_pat = "widget-123456 " + ("x" * 70000)
     caught = Redactor(use_env=False, extra_patterns=[r"widget-\d{6}"]).redact_text(long_pat)
     assert "widget-123456" not in caught
+
+
+def test_extra_pattern_scans_past_chunk_and_border():
+    from agents_traces.redact import _EXTRA_CHUNK
+
+    redactor = Redactor(use_env=False, extra_patterns=[r"widget-\d{6}"])
+    far = "widget-700000"
+    text = ("z" * 70000) + far + "TAIL"
+    assert text.index(far) == 70000
+    out = redactor.redact_text(text)
+    assert far not in out
+    assert out.startswith("z" * 70000)
+    assert out.endswith("TAIL")
+
+    border = "widget-654321"
+    start = _EXTRA_CHUNK - 4
+    straddling = ("q" * start) + border + "END"
+    assert start < _EXTRA_CHUNK < start + len(border)
+    out = redactor.redact_text(straddling)
+    assert border not in out
+    assert out.startswith("q" * start)
+    assert out.endswith("END")
+
+
+def test_quantified_alternation_is_skipped():
+    redactor = Redactor(use_env=False, extra_patterns=[r"(a|aa)+", r"widget-\d{6}"])
+    text = ("a" * 32) + " widget-123456"
+    out = redactor.redact_text(text)
+    assert "a" * 32 in out
+    assert "widget-123456" not in out
+    assert "(a|aa)+" not in out
 
 
 def test_regex_timeout_leaves_text(monkeypatch: pytest.MonkeyPatch):
@@ -311,7 +338,7 @@ def test_regex_timeout_leaves_text(monkeypatch: pytest.MonkeyPatch):
         def search(self, text, timeout=None):
             return None
 
-        def sub(self, repl, text, timeout=None):
+        def finditer(self, text, timeout=None):
             assert timeout == redact_mod._REGEX_TIMEOUT
             raise TimeoutError("slow")
 
