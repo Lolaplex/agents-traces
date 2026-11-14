@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `export_session` / `session_chat` rebuild one session's chat from traces as Markdown or JSON (messages, tool calls, compaction frames, retained bodies). CLI: `agents-traces export`. MCP: `export_session`.
+- Write-time secret redaction in `TraceStore.append`, before the JSONL line and any content blob. Built-in coverage: common token shapes, `Authorization` / `Proxy-Authorization` values, secret `key=value` and JSON fields (`password`, `api_key`, `token`, …), and env assignments whose names mark the value secret (`GITHUB_TOKEN`, `OPENAI_API_KEY`; not `MAX_TOKENS` or `TOKEN_COUNT`). The placeholder is `[redacted]`. Digests are recomputed from the redacted text. Unquoted dictionary words (`password: use a manager`) stay. Fixed-length vendor tokens (`ghp_` plus 36 letters) are removed with or without a digit. Extra patterns that nest quantifiers, repeat an unbounded dot, match empty, or exceed 200 characters are skipped and not logged; only the first 65536 characters are scanned, and the `regex` module's timeout is used when that package is installed.
+- Extra redaction patterns via `TraceStore(..., extra_patterns=[...])`, `configure_redaction(extra_patterns=[...])`, or `AGENTS_TRACE_REDACT_EXTRA` (JSON array of regexes). `AGENTS_TRACE_REDACT=0` or `TraceStore(..., redact=False)` turns redaction off.
 - `SessionStore.delete(session_id, persona)` removes a session record file (used by the relay `DELETE .../sessions/<s>` route).
 - Trace events now carry `workspace` + `persona` in metadata (C201 contract): `record_message` accepts `workspace=`/`persona=` kwargs with `AGENTS_WORKSPACE`/`AGENTS_PERSONA` env fallback; `append_trace` stamps tool-call events from the child env the loop pins.
 

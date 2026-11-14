@@ -34,8 +34,10 @@ from .content import (
     content_sha256,
     read_content,
 )
+from .export import CHAT_FORMAT, ExportError, export_session, session_chat
 from .interceptor import append_trace, auto_trace_mcp, trace_call
 from .models import TraceEvent
+from .redact import REDACTED, Redactor, configure_redaction
 from .stats import compute_stats
 from .store import TraceStore, get_default_traces_dir
 from .timeline import render_timeline
@@ -137,6 +139,13 @@ __all__ = [
     "TraceEvent",
     "TraceStore",
     "SessionTracer",
+    "CHAT_FORMAT",
+    "ExportError",
+    "export_session",
+    "session_chat",
+    "REDACTED",
+    "Redactor",
+    "configure_redaction",
     "trace_call",
     "auto_trace_mcp",
     "append_trace",

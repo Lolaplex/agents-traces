@@ -37,6 +37,10 @@ Each UTC day is one append-only file: `<ws>/traces/YYYY-MM-DD.jsonl` (override `
 
 **Assemble.** `agents-traces assemble --session <id>` rebuilds chat-completions messages for that session from the JSONL. Tool bodies can be dropped; user turns stay.
 
+**Export.** `agents-traces export --session <id> [--format markdown|json]` writes that session's chat (messages, tool calls, compaction frames) from the same files. Bodies are the retained text.
+
+**Redaction.** Append replaces tokens, Authorization values, secret assignments (`password`, `api_key`, `token`, …), and env values whose names mark them secret with `[redacted]` before the line or content blob is written. An unquoted dictionary word such as `password: use a manager` stays. Extra patterns are configuration (`TraceStore(extra_patterns=…)` or `AGENTS_TRACE_REDACT_EXTRA`, a JSON array of strings). Unsafe extra patterns are skipped and not logged.
+
 **Session text.** `session_snap`, `session_grep`, and `session_tail` search message text in this store. They do not read [agents-memory](https://github.com/Lolaplex/agents-memory).
 
 **Ingest.** `ingest` copies IDE transcripts (Antigravity, Cursor, Claude, Cline) into the daily files. Live sessions already on disk are not duplicated.
@@ -78,11 +82,12 @@ Primary surface. Agents diagnose a failed loop here.
 | `session_grep` | Search those messages. Optional `since` / `until` date or timestamp |
 | `read_content` | Fetch full text by session and digest. Offset/limit window, digest checked |
 | `session_tail` | Last lines for one session, or the latest |
+| `export_session` | One session's chat as Markdown or JSON |
 | `trace_seal` | Cryptographically seal tool calls into a SHA-256 hash chain |
 | `trace_verify` | Verify cryptographic integrity of a sealed hash chain |
 | `trace_audit` | Audit for non-determinism, redundant calls, and scope violations |
 
-Thirteen tools. Full contract: [`abi/MCP.md`](abi/MCP.md). A host may call `read_content` as an optional backend; this package does not import or require a host.
+Full contract: [`abi/MCP.md`](abi/MCP.md). A host may call `read_content` as an optional backend; this package does not import or require a host.
 
 ---
 
@@ -100,6 +105,7 @@ Ops / install / batch. Machine-readable catalog: `python -m agents_traces --help
 | `agents-traces tail [-n N] [-f] [--raw]` | End of today's file. `-f` follows |
 | `agents-traces record …` | Append one event from a shell |
 | `agents-traces assemble --session ID [--limit N] [--days N] [--include-tools]` | Rebuild chat messages for that session |
+| `agents-traces export [--session ID] [--format markdown\|json] [-o path] [--no-tools] [--no-frames] [--days N]` | Write that session's chat. No id = latest |
 | `agents-traces read --session ID --digest HEX [--offset N] [--limit N] [--json]` | Fetch retained text; digest is checked |
 | `agents-traces ingest` | IDE transcripts → daily JSONL |
 | `agents-traces cleanup [--keep-days N] [--compress]` | Delete old files, or gzip them |
