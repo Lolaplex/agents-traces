@@ -272,6 +272,39 @@ def read_content(session_id: str, digest: str, offset: int = 0, limit: int = -1)
 
 
 @mcp.tool()
+def export_session(
+    session_id: str = "",
+    format: str = "markdown",
+    include_tools: bool = True,
+    include_frames: bool = True,
+) -> str:
+    """Export one session's chat from traces as Markdown or JSON.
+
+    ``format`` is ``markdown`` (or ``md``) or ``json``. Omit ``session_id``
+    for the latest session. A ``trace:`` prefix is stripped. Tool calls and
+    compaction frames are included unless the matching flag is false.
+    Message and tool bodies are the retained text.
+    """
+    from .export import ExportError, export_session as export_session_text
+
+    sid = session_id.strip() if session_id else ""
+    if not sid:
+        sid = store.get_last_session_id() or ""
+    if not sid:
+        return json.dumps({"error": "not_found", "message": "no sessions found"})
+    try:
+        return export_session_text(
+            sid,
+            store=store,
+            fmt=format,
+            include_tools=include_tools,
+            include_frames=include_frames,
+        )
+    except ExportError as exc:
+        return json.dumps({"error": exc.code, "message": str(exc), "session": sid})
+
+
+@mcp.tool()
 def session_tail(session_id: str = "", limit: int = 10) -> str:
     """Tail recent session messages from traces for one session id or the latest lines."""
     from .session_view import session_tail as view_tail

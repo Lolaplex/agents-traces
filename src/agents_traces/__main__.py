@@ -1,6 +1,6 @@
 """
 CLI entry point for agents-trace.
-Commands: init, stats, inspect, sessions, tail, record, assemble, read, cleanup, ingest, serve, skills, sync-mcp
+Commands: init, stats, inspect, sessions, tail, record, assemble, export, read, cleanup, ingest, serve, skills, sync-mcp
 """
 
 from __future__ import annotations
@@ -187,6 +187,37 @@ def cmd_record(args: argparse.Namespace, store: TraceStore) -> None:
     )
     store.append(event)
     print(f"\033[32m✓ Recorded event to {store.get_date_file_path().name}\033[0m")
+
+
+def cmd_export(args: argparse.Namespace, store: TraceStore) -> int:
+    """Write one session's chat as Markdown or JSON."""
+    from .export import ExportError, export_session
+
+    session_id = getattr(args, "session", None) or store.get_last_session_id()
+    if not session_id:
+        print("No sessions found in traces.", file=sys.stderr)
+        return 1
+    try:
+        text = export_session(
+            session_id,
+            store=store,
+            fmt=getattr(args, "format", None) or "markdown",
+            include_tools=not getattr(args, "no_tools", False),
+            include_frames=not getattr(args, "no_frames", False),
+            days=getattr(args, "days", None),
+        )
+    except ExportError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    output = getattr(args, "output", None)
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text, encoding="utf-8")
+        print(f"Wrote {out_path}")
+        return 0
+    sys.stdout.write(text)
+    return 0
 
 
 def cmd_read(args: argparse.Namespace, store: TraceStore) -> int:
@@ -426,6 +457,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_assemble.add_argument("--days", type=int, default=30, help="Trace files to scan")
     p_assemble.add_argument("--include-tools", action="store_true")
 
+    p_export = subparsers.add_parser(
+        "export",
+        help="Export one session's chat as Markdown or JSON",
+    )
+    p_export.add_argument("--session", help="Session id (defaults to latest; trace: prefix optional)")
+    p_export.add_argument(
+        "--format",
+        default="markdown",
+        help="markdown (default), md, or json",
+    )
+    p_export.add_argument("--output", "-o", help="Write to this path instead of stdout")
+    p_export.add_argument("--no-tools", action="store_true", help="Omit tool calls")
+    p_export.add_argument("--no-frames", action="store_true", help="Omit compaction frames")
+    p_export.add_argument("--days", type=int, default=None, help="Scan only the last N UTC days")
+
     p_read = subparsers.add_parser(
         "read",
         help="Read retained message or tool content by digest",
@@ -566,6 +612,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(json.dumps({"session": args.session, "messages": msgs}, ensure_ascii=False, indent=2))
         return 0
+    elif args.command == "export":
+        return cmd_export(args, store)
     elif args.command == "read":
         return cmd_read(args, store)
     elif args.command == "compact":

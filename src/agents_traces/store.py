@@ -6,11 +6,12 @@ import os
 import shutil
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Generator, Iterable, List, Optional, Set
+from typing import Generator, Iterable, List, Optional, Sequence, Set
 
 from agents_workspace import Workspace
 
 from .models import TraceEvent
+from .redact import Redactor, default_redactor
 
 
 def get_default_traces_dir() -> Path:
@@ -19,12 +20,29 @@ def get_default_traces_dir() -> Path:
 
 
 class TraceStore:
-    def __init__(self, traces_dir: Optional[Path | str] = None):
+    def __init__(
+        self,
+        traces_dir: Optional[Path | str] = None,
+        *,
+        redact: Optional[bool] = None,
+        extra_patterns: Optional[Sequence[str]] = None,
+        redactor: Optional[Redactor] = None,
+    ):
         if traces_dir is not None:
             self.traces_dir = Path(traces_dir).expanduser().resolve()
         else:
             self.traces_dir = get_default_traces_dir()
         self.traces_dir.mkdir(parents=True, exist_ok=True)
+        if redactor is not None:
+            self.redactor = redactor
+        elif redact is None and not extra_patterns:
+            self.redactor = default_redactor()
+        else:
+            self.redactor = Redactor(
+                extra_patterns=extra_patterns,
+                enabled=redact,
+                use_env=redact is not False,
+            )
 
     def get_date_file_path(self, target_date: Optional[date] = None) -> Path:
         """Return the .jsonl file path for a given date (defaults to UTC today)."""
@@ -32,13 +50,15 @@ class TraceStore:
         return self.traces_dir / f"{d.strftime('%Y-%m-%d')}.jsonl"
 
     def append(self, event: TraceEvent) -> None:
-        """Ultra-fast atomic-like append to daily trace file.
+        """Append one event to the daily file.
 
-        Strings over the inline cap are spilled to content-addressed artifacts
-        before the line is written. Short events take the same single append.
+        Secrets are redacted before the line and any content blob are written.
+        Strings over the inline cap then spill to content-addressed artifacts.
+        Short events take the same single append.
         """
         from .content import spill_overflow
 
+        self.redactor.redact_event(event)
         spill_overflow(self.traces_dir, event)
         # Extract target date from event timestamp if possible, fallback to today
         target_date: Optional[date] = None
