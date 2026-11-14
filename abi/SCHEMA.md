@@ -116,3 +116,24 @@ The matching metadata keys (prefix `result_`, `error_`, or `stack_` for those fi
 Prompt previews that do not fit carry the same facts: `<ref digest="…" sha256="…" chars="…" truncated="1"/>`. That marker is an address. It is not a summary of the missing text.
 
 `read_content(session, digest, offset=0, limit=None)` loads the body for that session, checks the digest against the full bytes, then returns the character window. `offset` and `limit` are code-point indexes. A mismatch raises `DigestMismatchError`. Lines written by older versions are still readable: the call returns the text that was actually stored and checks the digest against those bytes. Characters dropped before this layout existed are not recoverable.
+
+---
+
+## Redaction
+
+`TraceStore.append` redacts secrets before it writes the JSONL line or a content blob. Surrounding text stays. The removed value is `[REDACTED]`. Digests (`sha256`, `digest`, `chars`) are recomputed from the redacted text when those keys are already present and the field was not already truncated.
+
+Built-in coverage:
+
+- Token shapes with a stable vendor prefix (`sk-`, `ghp_`, `github_pat_`, `glpat-`, `xox[baprs]-`, `AKIA`/`ASIA`, `AIza`, `sk_live_`/`sk_test_`, `hf_`, `npm_`, `eyJ` JWTs, PEM private keys, and a few others of the same kind). Variable-length prefixes also require a digit so ordinary words (`sk-implementation-details`) stay.
+- `Authorization` and `Proxy-Authorization` values (`Bearer`, `Basic`, `Token`), and a long bare `Bearer` credential.
+- `user:password@host` in URLs. The user and host stay.
+- Assignments and JSON fields whose key is a secret name: `password`, `passwd`, `passphrase`, `pwd`, `secret`, `token`, `api_key`, `access_token`, `private_key`, `client_secret`, `authorization`, and the same name with a prefix (`x-api-key`, `aws_secret_access_key`). A secret key's value is replaced entirely, including nested fields. `authorization` is only removed when the value looks like a credential, so `authorization: enabled` stays.
+- Uppercase environment assignments whose name marks the value secret. A component of `SECRET`, `PASSWORD`, `TOKEN`, `API_KEY`, `ACCESS_KEY`, or `PRIVATE_KEY` counts (`GITHUB_TOKEN`, `OPENAI_API_KEY`, `AWS_SECRET_ACCESS_KEY`), including a short value. `TOKEN_COUNT` and `MAX_TOKENS` do not. A bare `TOKEN` does not. The same words in lowercase follow the key rules above (`api_key=example` stays; `"api_key": "example"` does not).
+- An unquoted `password`, `passwd`, `passphrase`, or `pwd` assignment takes the next token, so `password: use a manager` stores `password: [REDACTED] a manager`.
+
+Free-text passwords that are not an assignment, header, env value, or known token shape are left as written.
+
+Extra patterns are regular expressions; the whole match is replaced. Pass them to `TraceStore(..., extra_patterns=[...])` or `configure_redaction(extra_patterns=[...])`. `AGENTS_TRACE_REDACT_EXTRA` is a JSON array of the same patterns and is read when an event is written. `AGENTS_TRACE_REDACT=0` disables the default redactor. `TraceStore(..., redact=False)` disables it for that store. A bad pattern raises `ValueError` and the event is not written.
+
+Lines already on disk are not rewritten.

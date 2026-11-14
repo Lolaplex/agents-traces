@@ -44,6 +44,10 @@ Fetch one retained message or tool body. `digest` is the 12-character `<ref dige
 
 Last messages for one session id, or the latest lines when `session_id` is empty.
 
+### `export_session(session_id="", format="markdown", include_tools=True, include_frames=True)`
+
+One session's chat from the traces, as Markdown or JSON. `format` is `markdown`, `md`, or `json`. Omit `session_id` for the latest. A `trace:` prefix is stripped. Tool calls and compaction frames are included unless the matching flag is false. Message and tool bodies are the retained text. A missing session returns `{"error": "not_found", ...}`. CLI mirror: `agents-traces export`.
+
 ### `trace_seal(session_id=None, output_path=None)`
 
 Cryptographically seal tool invocations of a session into a SHA-256 hash chain starting at genesis. Optional `output_path` writes the sealed JSONL.
