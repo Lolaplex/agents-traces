@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Sync tests point at the workspace root (`<host>/workspaces/default`) now that `AGENTS_HOME` is removed.
+
 ### Added
 - `export_session` / `session_chat` rebuild one session's chat from traces as Markdown or JSON (messages, tool calls, compaction frames, retained bodies). CLI: `agents-traces export`. MCP: `export_session`.
 - Write-time secret redaction in `TraceStore.append`, before the JSONL line and any content blob. Built-in coverage: common token shapes, `Authorization` / `Proxy-Authorization` values, secret `key=value` and JSON fields (`password`, `api_key`, `token`, …), and env assignments whose names mark the value secret (`GITHUB_TOKEN`, `OPENAI_API_KEY`; not `MAX_TOKENS` or `TOKEN_COUNT`). The placeholder is `[redacted]`. Digests are recomputed from the redacted text. Unquoted dictionary words (`password: use a manager`) stay. Fixed-length vendor tokens (`ghp_` plus 36 letters) are removed with or without a digit. Extra patterns that nest quantifiers, quantify an alternation (`(a|aa)+`), repeat an unbounded dot, match empty, or exceed 200 characters are skipped and not logged. They run on the whole text in 8192-character windows overlapping by 4096. A match that hits a window edge is completed on the full text, so there is no maximum replaced length. The `regex` module's timeout is used when that package is installed; a timed-out completion still redacts from the match start through the end of that window.
