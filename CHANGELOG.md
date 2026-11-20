@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `--help-json` now emits a curated `commands` map with usage, `side_effects`, and JSON parameters (was a raw argparse dump). agents-harness Cordis discovery can classify and argv-map suite calls live; `audit`/`seal`/`verify`/`stats`/`sessions` and friends are exposed per command.
+
 ### Fixed
 - `resolve()` no longer mints a new `SessionRecord` on every call when traces hold no resumable thread. One active session per (workspace, user, persona): the newest stored record is reused before falling through to legacy adoption or a fresh mint, so repeat resolves of the same tuple keep the same `ses_` id. `new_session=True` and the idle/stale rollover still mint deliberately.
 - Session and persona ids are validated (`[A-Za-z0-9][A-Za-z0-9_-]*`) before any `SessionStore` path is built: `resolve()` rejects them up front and `put` raises `ValueError`, so a crafted `session=../../x` or `persona=../x` can no longer write session files outside `<ws>/personas/<p>/sessions/`. Reads clamp instead — `get`/`delete` treat un-storable ids as absent, traced ids that cannot be stored resume without persisting, and non-conforming persona dirs are skipped.
