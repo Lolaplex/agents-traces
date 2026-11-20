@@ -551,6 +551,17 @@ class IdentityStore:
             self.save()
             return Resolved(user=person, session=rec, alias=alias)
 
+        # One active session per (workspace, user, persona): when traces
+        # hold no resumable thread, reuse the stored record instead of
+        # minting another session for the same tuple.
+        stored = sessions.list(persona=persona_id, user=person.id)
+        if stored:
+            rec = max(stored,
+                      key=lambda r: (r.last_active or r.created_at, r.id))
+            self.save()
+            return Resolved(user=person, session=rec, alias=alias,
+                            legacy=not rec.id.startswith("ses_"))
+
         if alias and channel and str(user).strip():
             old = legacy_session_id(channel, user)
             exists = bool(legacy_exists(old)) if legacy_exists is not None else False

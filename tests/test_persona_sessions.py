@@ -66,6 +66,32 @@ class PersonaSessions(unittest.TestCase):
         self.assertEqual(res.session.persona, "cos")
         self.assertEqual(res.session.id, first.session.id)
 
+    def test_resolve_reuses_active_session_per_tuple(self):
+        # agents-traces#7: one active session per (workspace, user, persona)
+        none = lambda **kw: None
+        store = IdentityStore(workspace=self.ws)
+        a = store.resolve(channel="repl", user="me", persona="cos",
+                          trace_lookup=none)
+        b = store.resolve(channel="repl", user="me", persona="cos",
+                          trace_lookup=none)
+        self.assertEqual(a.session.id, b.session.id)
+        # reuse is disk-backed, not an in-memory cache
+        store2 = IdentityStore(workspace=self.ws)
+        c = store2.resolve(channel="repl", user="me", persona="cos",
+                           trace_lookup=none)
+        self.assertEqual(a.session.id, c.session.id)
+        # a different persona keeps its own thread
+        d = store.resolve(channel="repl", user="me", persona="ops",
+                          trace_lookup=none)
+        self.assertNotEqual(a.session.id, d.session.id)
+        # explicit new_session mints; the mint becomes the active record
+        n = store.resolve(channel="repl", user="me", persona="cos",
+                          new_session=True, trace_lookup=none)
+        self.assertNotEqual(a.session.id, n.session.id)
+        e = store.resolve(channel="repl", user="me", persona="cos",
+                          trace_lookup=none)
+        self.assertEqual(n.session.id, e.session.id)
+
     def test_session_id_traversal_rejected(self):
         # agents-traces#6: a session id must never escape the sessions dir
         store = IdentityStore(workspace=self.ws)
