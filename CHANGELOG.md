@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Session and persona ids are validated (`[A-Za-z0-9][A-Za-z0-9_-]*`) before any `SessionStore` path is built: `resolve()` rejects them up front and `put` raises `ValueError`, so a crafted `session=../../x` or `persona=../x` can no longer write session files outside `<ws>/personas/<p>/sessions/`. Reads clamp instead — `get`/`delete` treat un-storable ids as absent, traced ids that cannot be stored resume without persisting, and non-conforming persona dirs are skipped.
+
 ### Changed
 - Sync tests point at the workspace root (`<host>/workspaces/default`) now that `AGENTS_HOME` is removed.
 

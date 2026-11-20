@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -23,6 +24,16 @@ from typing import Any, Callable, Optional
 from agents_workspace import Workspace
 
 _ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+_ID_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+
+def _valid_id(raw: str, kind: str) -> str:
+    """Ids become file names under the workspace: no separators, no dots."""
+    v = (raw or "").strip()
+    if not _ID_OK.match(v):
+        raise ValueError(f"invalid {kind} id: {raw!r}")
+    return v
 
 
 def mint_ulid() -> str:
@@ -180,10 +191,10 @@ class SessionStore:
         self.ws = workspace or Workspace.from_env()
 
     def _dir(self, persona: str) -> Path:
-        return self.ws.personas / persona / "sessions"
+        return self.ws.personas / _valid_id(persona, "persona") / "sessions"
 
     def _path(self, persona: str, session_id: str) -> Path:
-        return self._dir(persona) / f"{session_id}.json"
+        return self._dir(persona) / (_valid_id(session_id, "session") + ".json")
 
     def put(self, rec: SessionRecord, persona: str = "") -> SessionRecord:
         p = persona or rec.persona or self.ws.default_persona or "default"
@@ -198,9 +209,15 @@ class SessionStore:
         return rec
 
     def get(self, session_id: str, persona: str = "") -> Optional[SessionRecord]:
+        # an id that cannot be stored simply does not exist
+        if not _ID_OK.match(session_id or ""):
+            return None
         personas = [persona] if persona else self._persona_ids()
         for p in personas:
-            path = self._path(p, session_id)
+            try:
+                path = self._path(p, session_id)
+            except ValueError:
+                continue
             if path.is_file():
                 try:
                     return SessionRecord.from_dict(
@@ -214,12 +231,18 @@ class SessionStore:
         if not root.is_dir():
             return []
         return sorted(e.name for e in root.iterdir()
-                      if e.is_dir() and (e / "sessions").is_dir())
+                      if e.is_dir() and _ID_OK.match(e.name)
+                      and (e / "sessions").is_dir())
 
     def delete(self, session_id: str, persona: str = "") -> bool:
+        if not _ID_OK.match(session_id or ""):
+            return False
         personas = [persona] if persona else self._persona_ids()
         for p in personas:
-            path = self._path(p, session_id)
+            try:
+                path = self._path(p, session_id)
+            except ValueError:
+                continue
             if path.is_file():
                 path.unlink()
                 return True
@@ -435,9 +458,10 @@ class IdentityStore:
 
         self._ensure()
         sessions = SessionStore(self.ws)
-        persona_id = resolve_persona(persona, self.ws)
+        persona_id = _valid_id(resolve_persona(persona, self.ws), "persona")
 
         if session and session.lower() not in ("new", "new_session"):
+            session = _valid_id(session, "session")
             trace_uid = self._user_id_from_traces(session)
             person = self._ensure_user(alias=alias, user_id=user_id or trace_uid)
             existing = sessions.get(session)
@@ -491,7 +515,9 @@ class IdentityStore:
                 traced.workspace = self.ws_id
                 traced.persona = persona_id
                 traced.channel = channel
-                sessions.put(traced)
+                # traced ids come from ingest too — persist only storable ones
+                if _ID_OK.match(traced.id):
+                    sessions.put(traced)
             self.save()
             return Resolved(
                 user=person,

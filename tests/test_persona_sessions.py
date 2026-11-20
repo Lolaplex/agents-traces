@@ -8,6 +8,7 @@ from agents_workspace import Host
 
 from agents_traces.identity import (
     IdentityStore,
+    SessionRecord,
     SessionStore,
     mint_session_id,
 )
@@ -64,6 +65,35 @@ class PersonaSessions(unittest.TestCase):
                              channel="repl", user="me")
         self.assertEqual(res.session.persona, "cos")
         self.assertEqual(res.session.id, first.session.id)
+
+    def test_session_id_traversal_rejected(self):
+        # agents-traces#6: a session id must never escape the sessions dir
+        store = IdentityStore(workspace=self.ws)
+        with self.assertRaises(ValueError):
+            store.resolve(session="../../escape",
+                          channel="repl", user="me")
+        self.assertFalse((self.ws.personas / "escape.json").exists())
+        with self.assertRaises(ValueError):
+            store.resolve(session="a/b", channel="repl", user="me")
+
+    def test_persona_id_traversal_rejected(self):
+        store = IdentityStore(workspace=self.ws)
+        with self.assertRaises(ValueError):
+            store.resolve(channel="repl", user="me",
+                          persona="../outside", new_session=True)
+        self.assertFalse(
+            (self.ws.personas.parent / "outside").exists())
+
+    def test_session_store_write_clamps_ids(self):
+        sessions = SessionStore(self.ws)
+        rec = SessionRecord(id="../x", user="u_1", start_date="2026-01-01")
+        with self.assertRaises(ValueError):
+            sessions.put(rec)
+        with self.assertRaises(ValueError):
+            sessions.put(rec, persona="bad/persona")
+        # reads clamp: an id that cannot be stored simply does not exist
+        self.assertIsNone(sessions.get("../x"))
+        self.assertFalse(sessions.delete("../x"))
 
     def test_list_sessions_scoped_by_persona(self):
         store = IdentityStore(workspace=self.ws)
