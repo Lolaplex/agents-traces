@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--help-json` emits `cordis_expose: true` so agents-harness auto-mounts this package's commands as Cordis tools when no checked-in manifest exists (#32/#34).
+
 ### Changed
 - `--help-json` now emits a curated `commands` map with usage, `side_effects`, and JSON parameters (was a raw argparse dump). agents-harness Cordis discovery can classify and argv-map suite calls live; `audit`/`seal`/`verify`/`stats`/`sessions` and friends are exposed per command.
 

@@ -19,6 +19,7 @@ def help_json() -> dict:
     return {
         "command": "agents-traces",
         "description": "Append-only JSONL session traces and per-request assemble.",
+        "cordis_expose": True,
         "commands": {
             "stats": {
                 "usage": "agents-traces stats [--date D] [--days N] [--by-model] [--json]",
