@@ -58,6 +58,38 @@ def _host_dir_fallback() -> Path:
     return (Path.home() / ".agents").resolve()
 
 
+class _StandaloneWorkspace:
+    """Minimal workspace view used when agents-workspace is absent."""
+
+    def __init__(self, ws_dir: Path, host_dir: Path) -> None:
+        self.id = ""
+        self.default_persona = "default"
+        self.dir = ws_dir
+        self.personas = ws_dir / "personas"
+        self.identity = host_dir / "users.json"
+
+    @classmethod
+    def from_env(cls) -> "_StandaloneWorkspace":
+        host_dir = _host_dir_fallback()
+        raw_root = os.environ.get("AGENTS_WORKSPACE_ROOT", "").strip()
+        ws_id = os.environ.get("AGENTS_WORKSPACE", "").strip()
+        if raw_root:
+            ws_dir = Path(raw_root).expanduser().resolve()
+        elif ws_id:
+            ws_dir = host_dir / "workspaces" / ws_id
+        else:
+            ws_dir = host_dir
+        return cls(ws_dir, host_dir)
+
+
+def _current_workspace(workspace: "Workspace | None" = None):
+    if workspace is not None:
+        return workspace
+    if Workspace is not None:
+        return Workspace.from_env()
+    return _StandaloneWorkspace.from_env()
+
+
 def default_identity_path(workspace: "Workspace | None" = None) -> Path:
     if workspace is not None:
         return workspace.identity
@@ -218,7 +250,7 @@ class SessionStore:
     """
 
     def __init__(self, workspace: "Workspace | None" = None):
-        self.ws = workspace or Workspace.from_env()
+        self.ws = _current_workspace(workspace)
 
     def _dir(self, persona: str) -> Path:
         return self.ws.personas / _valid_id(persona, "persona") / "sessions"
@@ -301,7 +333,7 @@ def resolve_persona(explicit: str = "", workspace: "Workspace | None" = None) ->
     pick = (explicit or "").strip() or os.environ.get("AGENTS_PERSONA", "").strip()
     if pick:
         return pick
-    ws = workspace or Workspace.from_env()
+    ws = _current_workspace(workspace)
     return ws.default_persona or "default"
 
 

@@ -269,3 +269,22 @@ def test_bind_did_shaped_users_json_roundtrip(tmp_path, monkeypatch):
     assert user is not None
     assert user.did == "did:key:zDEF"
     assert user.aliases == ["telegram:42"]
+
+
+def test_identity_and_session_store_standalone_without_agents_workspace(tmp_path, monkeypatch):
+    import agents_traces.identity as mod
+
+    host = tmp_path / "host"
+    monkeypatch.setenv("AGENTS_HOST_DIR", str(host))
+    monkeypatch.delenv("AGENTS_USERS_FILE", raising=False)
+    monkeypatch.delenv("AGENTS_IDENTITY_PATH", raising=False)
+    monkeypatch.delenv("AGENTS_WORKSPACE", raising=False)
+    monkeypatch.delenv("AGENTS_WORKSPACE_ROOT", raising=False)
+    monkeypatch.setattr(mod, "Workspace", None)
+
+    store = IdentityStore()
+    resolved = store.resolve(channel="cli", user="alice")
+    assert resolved.user.id.startswith("u_")
+    assert resolved.session.persona == "default"
+    assert (host / "personas" / "default" / "sessions" / f"{resolved.session.id}.json").is_file()
+
