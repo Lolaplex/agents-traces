@@ -1,6 +1,6 @@
 """
 Automatic zero-overhead trace interceptors and decorators for FastMCP servers and agent tools.
-Strictly guarded: only logs if ~/.agents/traces/ exists or AGENTS_TRACES_DIR is set.
+Strictly guarded: only logs if <ws>/traces/ exists or AGENTS_TRACES_DIR is set.
 """
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ def append_trace(
 def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
     """
     Decorator for tool functions. Automatically measures duration, catches errors,
-    and appends every execution to ~/.agents/traces/YYYY-MM-DD.jsonl with zero overhead.
+    and appends every execution to <ws>/traces/YYYY-MM-DD.jsonl with zero overhead.
     """
 
     def decorator(fn: Callable) -> Callable:
@@ -198,8 +198,8 @@ def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
 def auto_trace_mcp(mcp_instance: Any) -> None:
     """
     Auto-wraps all FastMCP tools registered on an MCP instance so that every tool call
-    is automatically traced into ~/.agents/traces/ without altering tool code.
-    Only active if ~/.agents/traces/ exists.
+    is automatically traced into <ws>/traces/ without altering tool code.
+    Only active if <ws>/traces/ exists or AGENTS_TRACES_DIR is set.
     """
     if not is_tracing_enabled():
         return

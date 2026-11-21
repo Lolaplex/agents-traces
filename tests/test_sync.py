@@ -42,21 +42,45 @@ def test_splice_traces_inject_preserves_other_blocks():
 
 
 def test_sync_host_rules_and_always_on(monkeypatch):
+    import sys
     from agents_traces import sync as sync_mod
 
     with tempfile.TemporaryDirectory() as tmpdir:
         fake_home = Path(tmpdir)
-        monkeypatch.setenv("AGENTS_HOST_DIR", str(fake_home / ".agents"))
+        host_dir = fake_home / ".agents"
+        monkeypatch.setenv("AGENTS_HOST_DIR", str(host_dir))
         monkeypatch.setattr(Path, "home", lambda: fake_home)
         rules = sync_mod.sync_host_rules()
         assert any("agents-traces.mdc" in r for r in rules)
-        mdc = fake_home / ".agents" / "workspaces" / "default" / "rules" / "agents-traces.mdc"
+        mdc = host_dir / "workspaces" / "default" / "rules" / "agents-traces.mdc"
         assert mdc.is_file()
         assert "alwaysApply: true" in mdc.read_text(encoding="utf-8")
 
         files = sync_mod.sync_always_on_files()
-        agents_md = fake_home / ".agents" / "workspaces" / "default" / "AGENTS.md"
+        agents_md = host_dir / "AGENTS.md"
+        claude_md = host_dir / "CLAUDE.md"
         assert agents_md.is_file()
+        assert claude_md.is_file()
         assert sync_mod.MARKER in agents_md.read_text(encoding="utf-8")
+        assert sync_mod.MARKER in claude_md.read_text(encoding="utf-8")
+        assert not (host_dir / "workspaces" / "default" / "AGENTS.md").exists()
         assert len(files) >= 4
+
+        # Custom CLAUDE.md keeps its own text across repeated syncs
+        claude_md.unlink()
+        claude_md.write_text("# Custom CLAUDE notes\n", encoding="utf-8")
+        sync_mod.sync_always_on_files()
+        sync_mod.sync_always_on_files()
+        c_text = claude_md.read_text(encoding="utf-8")
+        assert "# Custom CLAUDE notes" in c_text
+        assert c_text.count(sync_mod.MARKER) == 1
+
+        # Standalone ImportError fallback without agents_workspace
+        monkeypatch.setitem(sys.modules, "agents_workspace", None)
+        standalone_host = fake_home / "standalone_agents"
+        monkeypatch.setenv("AGENTS_HOST_DIR", str(standalone_host))
+        sync_mod.sync_always_on_files()
+        assert (standalone_host / "AGENTS.md").is_file()
+        assert (standalone_host / "CLAUDE.md").is_file()
+        assert sync_mod.MARKER in (standalone_host / "AGENTS.md").read_text(encoding="utf-8")
 

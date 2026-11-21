@@ -18,7 +18,7 @@ from .redact import Redactor, default_redactor
 
 
 def get_default_traces_dir() -> Path:
-    """Traces directory from the workspace (AGENTS_TRACES_DIR wins)."""
+    """Workspace traces dir (<ws>/traces, AGENTS_TRACES_DIR overrides)."""
     if Workspace is not None:
         return Workspace.from_env().traces
     raw = os.environ.get("AGENTS_TRACES_DIR", "").strip()

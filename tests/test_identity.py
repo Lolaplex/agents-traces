@@ -188,3 +188,84 @@ def test_stale_rollover_records_trace_link_and_assemble_continues():
 
             msgs = assemble_messages(resolved.session.id, limit=24)
             assert any("earlier context" in (m["content"] or "") for m in msgs)
+
+
+def test_default_identity_path_standalone_fallback(tmp_path, monkeypatch):
+    import sys
+    from agents_traces.identity import default_identity_path
+
+    host = tmp_path / "host"
+    monkeypatch.setenv("AGENTS_HOST_DIR", str(host))
+    monkeypatch.delenv("AGENTS_USERS_FILE", raising=False)
+    monkeypatch.delenv("AGENTS_IDENTITY_PATH", raising=False)
+    monkeypatch.setitem(sys.modules, "agents_workspace", None)
+
+    assert default_identity_path() == host.resolve() / "users.json"
+
+    custom = tmp_path / "custom_users.json"
+    monkeypatch.setenv("AGENTS_USERS_FILE", str(custom))
+    assert default_identity_path() == custom.resolve()
+
+
+def test_load_normalizes_legacy_alias_keyed_rows(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setenv("AGENTS_HOST_DIR", str(tmp_path / "host"))
+    users_path = tmp_path / "users.json"
+    users_path.write_text(
+        json.dumps(
+            {
+                "users": {
+                    "felix": {"did": "did:key:zABC"},
+                    "telegram:42": {"did": "did:key:zDEF"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = IdentityStore(users_path)
+    u_felix = store.find_by_alias("felix")
+    u_tg = store.find_by_alias("telegram:42")
+    assert u_felix is not None
+    assert u_felix.id.startswith("u_")
+    assert u_felix.aliases == ["felix"]
+    assert u_felix.did == "did:key:zABC"
+    assert u_tg is not None
+    assert u_tg.id.startswith("u_")
+    assert u_tg.aliases == ["telegram:42"]
+    assert u_tg.did == "did:key:zDEF"
+
+
+def test_bind_did_shaped_users_json_roundtrip(tmp_path, monkeypatch):
+    import json
+    from agents_workspace import Host
+
+    host = tmp_path / "host"
+    monkeypatch.setenv("AGENTS_HOST_DIR", str(host))
+    ws = Host.open(host).create("demo")
+    users_path = host / "users.json"
+    users_path.write_text(
+        json.dumps(
+            {
+                "users": {
+                    "u_112233445566": {
+                        "id": "u_112233445566",
+                        "aliases": ["telegram:42"],
+                        "did": "did:key:zDEF",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = IdentityStore(workspace=ws)
+    resolved = store.resolve(channel="telegram", user="42")
+    assert resolved.user.id == "u_112233445566"
+    assert resolved.user.did == "did:key:zDEF"
+    assert "telegram:42" in resolved.user.aliases
+
+    reloaded = IdentityStore(workspace=ws)
+    user = reloaded.get_user("u_112233445566")
+    assert user is not None
+    assert user.did == "did:key:zDEF"
+    assert user.aliases == ["telegram:42"]

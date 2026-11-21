@@ -51,8 +51,35 @@ def mint_ulid() -> str:
     return "".join(reversed(chars))
 
 
+def _host_dir_fallback() -> Path:
+    raw = os.environ.get("AGENTS_HOST_DIR", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return (Path.home() / ".agents").resolve()
+
+
 def default_identity_path(workspace: "Workspace | None" = None) -> Path:
-    return (workspace or Workspace.from_env()).identity
+    if workspace is not None:
+        return workspace.identity
+    try:
+        from agents_workspace import Host
+
+        return Host.from_env().users_file(os.environ)
+    except ImportError:
+        raw = os.environ.get("AGENTS_USERS_FILE", "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        legacy = os.environ.get("AGENTS_IDENTITY_PATH", "").strip()
+        if legacy:
+            import warnings
+
+            warnings.warn(
+                "AGENTS_IDENTITY_PATH is deprecated; use AGENTS_USERS_FILE",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            return Path(legacy).expanduser().resolve()
+        return _host_dir_fallback() / "users.json"
 
 
 def __getattr__(name: str):
@@ -284,8 +311,13 @@ class IdentityStore:
         path: Path | str | None = None,
         workspace: "Workspace | None" = None,
     ):
-        self.ws = workspace or Workspace.from_env()
-        self.ws_id = self.ws.id
+        if workspace is not None:
+            self.ws = workspace
+        elif Workspace is not None:
+            self.ws = Workspace.from_env()
+        else:
+            self.ws = None
+        self.ws_id = self.ws.id if self.ws is not None else ""
         self.path = Path(path) if path else default_identity_path(self.ws)
         self._users: dict[str, UserRecord] = {}
         self._loaded = False
@@ -302,11 +334,42 @@ class IdentityStore:
         if not isinstance(data, dict):
             return
         users = data.get("users") or {}
-        if isinstance(users, dict):
-            for key, row in users.items():
-                if isinstance(row, dict):
-                    rec = UserRecord.from_dict({**row, "id": row.get("id") or key})
-                    self._users[rec.id] = rec
+        if not isinstance(users, dict):
+            return
+        legacy_rows: list[tuple[str, dict[str, Any]]] = []
+        for key, row in users.items():
+            if not isinstance(row, dict):
+                continue
+            raw_id = str(row.get("id") or "").strip()
+            has_aliases = isinstance(row.get("aliases"), list)
+            if raw_id and _ID_OK.match(raw_id):
+                rec = UserRecord.from_dict({**row, "id": raw_id})
+                self._users[rec.id] = rec
+            elif str(key).startswith("u_") and _ID_OK.match(str(key)) and has_aliases:
+                rec = UserRecord.from_dict({**row, "id": str(key)})
+                self._users[rec.id] = rec
+            else:
+                legacy_rows.append((str(key), row))
+        for key, row in legacy_rows:
+            raw_id = str(row.get("id") or "").strip()
+            alias = raw_id or key
+            raw_aliases = row.get("aliases") if isinstance(row.get("aliases"), list) else []
+            aliases = [str(a) for a in raw_aliases if a]
+            if alias and alias not in aliases:
+                aliases.insert(0, alias)
+            did = str(row.get("did") or "")
+            existing = self.find_by_alias(alias) if alias else None
+            if existing is not None:
+                for a in aliases:
+                    if a not in existing.aliases:
+                        existing.aliases.append(a)
+                if did and not existing.did:
+                    existing.did = did
+                continue
+            uid = mint_user_id()
+            while uid in self._users or uid in users:
+                uid = mint_user_id()
+            self._users[uid] = UserRecord(id=uid, aliases=aliases, did=did)
 
     def _ensure(self) -> None:
         if not self._loaded:
@@ -371,6 +434,8 @@ class IdentityStore:
         if alias:
             found = self.find_by_alias(alias)
             if found:
+                if did and not found.did:
+                    found.did = did
                 return found
         uid = mint_user_id()
         user = UserRecord(id=uid, aliases=[alias] if alias else [], did=did)

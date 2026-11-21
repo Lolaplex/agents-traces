@@ -30,6 +30,15 @@ def _host_dir_fallback() -> Path:
     return Path(raw).expanduser() if raw else Path.home() / ".agents"
 
 
+def _host_dir() -> Path:
+    try:
+        from agents_workspace import Host
+
+        return Host.from_env().dir
+    except ImportError:
+        return _host_dir_fallback()
+
+
 def _workspace_dir() -> Path:
     try:
         from agents_workspace import Workspace
@@ -126,7 +135,7 @@ def zed_config_dir() -> Path:
 
 
 def sync_host_rules() -> List[str]:
-    """Write ~/.agents/rules/agents-traces.mdc and bind into Cursor, Gemini, Windsurf rules."""
+    """Write <ws>/rules/agents-traces.mdc and bind into Cursor, Gemini, Windsurf rules."""
     home = Path.home()
     agents_rules = _workspace_dir() / "rules"
     agents_rules.mkdir(parents=True, exist_ok=True)
@@ -164,11 +173,11 @@ def _upsert_agents_md(path: Path) -> str:
 
 
 def sync_always_on_files() -> List[str]:
-    """Splice <!-- agents-traces-sync --> block into global AGENTS.md / CLAUDE.md files."""
+    """Splice <!-- agents-traces-sync --> block into host AGENTS.md / CLAUDE.md files."""
     home = Path.home()
-    ws_root = _workspace_dir()
+    host_root = _host_dir()
     targets = [
-        ws_root / "AGENTS.md",
+        host_root / "AGENTS.md",
         home / ".gemini" / "config" / "AGENTS.md",
         zed_config_dir() / "AGENTS.md",
         home / ".claude" / "AGENTS.md",
@@ -177,14 +186,14 @@ def sync_always_on_files() -> List[str]:
     for target in targets:
         written.append(_upsert_agents_md(target))
 
-    for pair_dir in (ws_root, home / ".claude"):
+    for pair_dir in (host_root, home / ".claude"):
         agents_md = pair_dir / "AGENTS.md"
         claude_md = pair_dir / "CLAUDE.md"
         if claude_md.exists() and not claude_md.is_symlink():
             try:
                 c_text = claude_md.read_text(encoding="utf-8", errors="replace")
                 a_text = agents_md.read_text(encoding="utf-8", errors="replace")
-                if c_text != a_text and MARKER not in c_text:
+                if c_text != a_text:
                     written.append(_upsert_agents_md(claude_md))
                     continue
             except OSError:
@@ -392,7 +401,7 @@ def get_skill_source(skill_name: str) -> Path:
 
 
 def sync_skills() -> List[str]:
-    """Copy skills to ~/.gemini/config/skills/, ~/.agents/skills/, ~/.cursor/skills/, and ~/.claude/skills/."""
+    """Copy skills to ~/.gemini/config/skills/, <ws>/skills/, ~/.cursor/skills/, and ~/.claude/skills/."""
     home = Path.home()
     targets = [
         home / ".gemini" / "config" / "skills",
