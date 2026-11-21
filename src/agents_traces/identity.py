@@ -21,7 +21,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from agents_workspace import Workspace
+try:
+    from agents_workspace import Workspace
+except ImportError:
+    Workspace = None  # type: ignore[assignment]
 
 _ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 

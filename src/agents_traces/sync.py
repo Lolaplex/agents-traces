@@ -13,8 +13,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from agents_workspace import Workspace
-
 SKILLS = ["trace-inspect", "trace-stats"]
 
 MARKER = "<!-- agents-traces-sync -->"
@@ -27,8 +25,27 @@ ALWAYS_ON_BODY = """# Execution Observability (`agents-traces`)
 - **Token & Model Telemetry**: Use `get_session_stats` and `get_model_stats` for empirical token/cost/failure-rate metrics across sessions."""
 
 
+def _host_dir_fallback() -> Path:
+    raw = os.environ.get("AGENTS_HOST_DIR", "").strip()
+    return Path(raw).expanduser() if raw else Path.home() / ".agents"
+
+
 def _workspace_dir() -> Path:
-    return Workspace.from_env().root
+    try:
+        from agents_workspace import Workspace
+
+        return Workspace.from_env().dir
+    except ImportError:
+        return _host_dir_fallback()
+
+
+def _host_mcp_json() -> Path:
+    try:
+        from agents_workspace import Host
+
+        return Host.from_env().mcp_json
+    except ImportError:
+        return _host_dir_fallback() / "mcp.json"
 
 
 def mcp_entry() -> Dict[str, Any]:
@@ -181,7 +198,7 @@ def known_host_mcp_paths() -> List[Path]:
     home = Path.home()
     paths: List[Path] = [
         home / ".cursor" / "mcp.json",
-        Workspace.from_env().host.mcp_json,
+        _host_mcp_json(),
         home / ".claude.json",
         home / ".claude" / "mcp.json",
         home / ".claude" / "settings.json",

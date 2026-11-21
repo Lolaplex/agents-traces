@@ -8,7 +8,10 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Generator, Iterable, List, Optional, Sequence, Set
 
-from agents_workspace import Workspace
+try:
+    from agents_workspace import Workspace
+except ImportError:
+    Workspace = None  # type: ignore[assignment]
 
 from .models import TraceEvent
 from .redact import Redactor, default_redactor
@@ -16,7 +19,14 @@ from .redact import Redactor, default_redactor
 
 def get_default_traces_dir() -> Path:
     """Traces directory from the workspace (AGENTS_TRACES_DIR wins)."""
-    return Workspace.from_env().traces
+    if Workspace is not None:
+        return Workspace.from_env().traces
+    raw = os.environ.get("AGENTS_TRACES_DIR", "").strip()
+    if raw:
+        return Path(raw).expanduser().resolve()
+    host = os.environ.get("AGENTS_HOST_DIR", "").strip()
+    base = Path(host).expanduser() if host else Path.home() / ".agents"
+    return base / "traces"
 
 
 class TraceStore:

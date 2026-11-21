@@ -13,7 +13,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from agents_workspace import Workspace
+try:
+    from agents_workspace import Workspace
+except ImportError:
+    Workspace = None  # type: ignore[assignment]
 
 from .models import TraceEvent
 from .store import TraceStore, get_default_traces_dir
@@ -23,8 +26,10 @@ _process_sessions: Dict[str, str] = {}
 
 
 def _workspace_key() -> str:
-    ws = Workspace.from_env()
-    return ws.id or str(get_default_traces_dir())
+    if Workspace is not None:
+        ws = Workspace.from_env()
+        return ws.id or str(get_default_traces_dir())
+    return str(get_default_traces_dir())
 
 
 def _process_session() -> str:
