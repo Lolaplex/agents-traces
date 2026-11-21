@@ -1,6 +1,6 @@
 """
 Automatic zero-overhead trace interceptors and decorators for FastMCP servers and agent tools.
-Strictly guarded: only logs if ~/.agents/traces/ exists or AGENTS_TRACES_DIR is set.
+Strictly guarded: only logs if <ws>/traces/ exists or AGENTS_TRACES_DIR is set.
 """
 
 from __future__ import annotations
@@ -13,7 +13,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from agents_workspace import Workspace
+try:
+    from agents_workspace import Workspace
+except ImportError:
+    Workspace = None  # type: ignore[assignment]
 
 from .models import TraceEvent
 from .store import TraceStore, get_default_traces_dir
@@ -23,8 +26,10 @@ _process_sessions: Dict[str, str] = {}
 
 
 def _workspace_key() -> str:
-    ws = Workspace.from_env()
-    return ws.id or str(get_default_traces_dir())
+    if Workspace is not None:
+        ws = Workspace.from_env()
+        return ws.id or str(get_default_traces_dir())
+    return str(get_default_traces_dir())
 
 
 def _process_session() -> str:
@@ -114,7 +119,7 @@ def append_trace(
 def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
     """
     Decorator for tool functions. Automatically measures duration, catches errors,
-    and appends every execution to ~/.agents/traces/YYYY-MM-DD.jsonl with zero overhead.
+    and appends every execution to <ws>/traces/YYYY-MM-DD.jsonl with zero overhead.
     """
 
     def decorator(fn: Callable) -> Callable:
@@ -193,8 +198,8 @@ def trace_call(func: Optional[Callable] = None, *, name: Optional[str] = None):
 def auto_trace_mcp(mcp_instance: Any) -> None:
     """
     Auto-wraps all FastMCP tools registered on an MCP instance so that every tool call
-    is automatically traced into ~/.agents/traces/ without altering tool code.
-    Only active if ~/.agents/traces/ exists.
+    is automatically traced into <ws>/traces/ without altering tool code.
+    Only active if <ws>/traces/ exists or AGENTS_TRACES_DIR is set.
     """
     if not is_tracing_enabled():
         return
