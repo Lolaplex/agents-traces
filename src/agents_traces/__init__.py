@@ -42,7 +42,13 @@ from .stats import compute_stats
 from .store import TraceStore, get_default_traces_dir
 from .timeline import render_timeline
 
-__version__ = "0.1.1"
+from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
+from importlib.metadata import version as _version
+
+try:
+    __version__ = _version("agents-traces")
+except _PackageNotFoundError:  # a source checkout that was never installed
+    __version__ = "0.0.0+source"
 
 
 class SessionTracer:
