@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agents-traces"
-version = "0.1.1"
+version = "0.2.0"
 description = "Append-only JSONL session traces, assemble, and MCP inspect tools"
 readme = "README.md"
 license = "MIT"
@@ -13,7 +13,7 @@ authors = [{ name = "Lolaplex" }]
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.0.0,<2",
-    "agents-workspace>=0.1.0,<1",
+    "agents-workspace>=0.2.0,<1",
 ]
 keywords = ["mcp", "agents", "traces", "trace", "observability", "metrics", "logging", "coding-assistant", "cursor", "claude", "antigravity"]
 classifiers = [

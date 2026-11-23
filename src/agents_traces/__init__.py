@@ -42,7 +42,7 @@ from .stats import compute_stats
 from .store import TraceStore, get_default_traces_dir
 from .timeline import render_timeline
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 
 class SessionTracer:
