@@ -20,19 +20,26 @@ from typing import Optional
 
 
 def db_path(traces_dir: Optional[Path] = None) -> Optional[Path]:
-    """``<ws>/store.db`` for the active workspace; None when absent."""
+    """``<ws>/store.db`` next to ``traces_dir``, else the env workspace's.
+
+    An explicit ``traces_dir`` pins the workspace: a caller reading
+    ``TraceStore(other_dir)`` must see ``other_dir``'s sibling store.db,
+    never ``Workspace.from_env().store_db`` — and must not resolve the
+    env workspace at all (its domain-override warning is noise here).
+    ``AGENTS_STORE_DB`` remains the explicit override. None when absent.
+    """
     raw = os.environ.get("AGENTS_STORE_DB", "").strip()
     if raw:
         path = Path(raw)
+    elif traces_dir is not None:
+        path = Path(traces_dir).parent / "store.db"
     else:
         try:
             from agents_workspace import Workspace
 
             path = Path(Workspace.from_env().store_db)
         except Exception:
-            if traces_dir is None:
-                return None
-            path = Path(traces_dir).parent / "store.db"
+            return None
     return path if path.is_file() else None
 
 
@@ -60,9 +67,7 @@ def _entity_ords(conn, entities: list[str]) -> dict[str, str]:
     }
 
 
-def _live(conn, session_id: str) -> list[dict]:
-    """Live ``msg:*`` rows of one session: not deleted, not superseded by
-    a retired frame. Ordered ``(ts, ord, entity)`` like the projector."""
+def _msg_rows(conn, session_id: str) -> dict[str, dict]:
     rows: dict[str, dict] = {}
     for e, a, v in conn.execute(
         "SELECT e, a, v FROM v_current WHERE e IN ("
@@ -70,7 +75,12 @@ def _live(conn, session_id: str) -> list[dict]:
         (session_id,),
     ):
         rows.setdefault(e, {"e": e})[a.split(":", 1)[1]] = v
-    retired = {
+    return rows
+
+
+def _retired(conn, session_id: str) -> set[str]:
+    """``frame:*`` entities of this session flagged ``frame:retired``."""
+    return {
         r[0]
         for r in conn.execute(
             "SELECT r.e FROM v_current r JOIN v_current s ON s.e = r.e"
@@ -79,6 +89,13 @@ def _live(conn, session_id: str) -> list[dict]:
             (session_id,),
         )
     }
+
+
+def _live(conn, session_id: str) -> list[dict]:
+    """Live ``msg:*`` rows of one session: not deleted, not superseded by
+    a retired frame. Ordered ``(ts, ord, entity)`` like the projector."""
+    rows = _msg_rows(conn, session_id)
+    retired = _retired(conn, session_id)
     live = [
         r
         for r in rows.values()
@@ -92,33 +109,85 @@ def _live(conn, session_id: str) -> list[dict]:
     )
 
 
+def _dead(conn, session_id: str) -> list[dict]:
+    """Tombstoned ``msg:*`` rows (``msg:deleted='true'``): the projection's
+    record of turns a peer ``/undo``-ed or a frame covered, so a host
+    holding the raw JSONL can suppress its own cached copies."""
+    return [
+        r
+        for r in _msg_rows(conn, session_id).values()
+        if r.get("deleted") == "true"
+    ]
+
+
+def _frame_spans(conn, session_id: str) -> list[tuple[str, str]]:
+    """``(first_ts, last_ts)`` coverage of this session's ACTIVE frames.
+
+    Retired frames are skipped: a newer frame superseded their span, and
+    the rows they covered stay suppressed via ``msg:deleted`` anyway.
+    """
+    rows: dict[str, dict] = {}
+    for e, a, v in conn.execute(
+        "SELECT e, a, v FROM v_current WHERE e IN ("
+        " SELECT e FROM v_current WHERE a = 'frame:session' AND v = ?)",
+        (session_id,),
+    ):
+        rows.setdefault(e, {})[a] = v
+    retired = _retired(conn, session_id)
+    spans = []
+    for e, r in rows.items():
+        if e in retired:
+            continue
+        first = str(r.get("frame:first_ts") or "")
+        last = str(r.get("frame:last_ts") or "")
+        if first and last:
+            spans.append((first, last))
+    return spans
+
+
+def session_projection(session_id: str, *, traces_dir=None) -> dict:
+    """One-connection read of the synced projection for ``session_id``:
+    ``live`` msg rows, ``dead`` tombstoned rows, and active ``frames``
+    coverage spans. All empty when the projection is unavailable."""
+    empty: dict = {"live": [], "dead": [], "frames": []}
+    path = db_path(Path(traces_dir) if traces_dir else None)
+    if path is None:
+        return empty
+    conn = _connect(path)
+    if conn is None:
+        return empty
+    try:
+        live = [
+            {
+                "role": str(r.get("role") or "user"),
+                "text": str(r.get("text") or ""),
+                "ts": str(r.get("ts") or ""),
+                "persona": str(r.get("persona") or ""),
+                "user": str(r.get("user") or ""),
+                "host": str(r.get("host") or ""),
+            }
+            for r in _live(conn, session_id)
+        ]
+        dead = [
+            {
+                "role": str(r.get("role") or "user"),
+                "text": str(r.get("text") or ""),
+                "ts": str(r.get("ts") or ""),
+            }
+            for r in _dead(conn, session_id)
+        ]
+        return {"live": live, "dead": dead,
+                "frames": _frame_spans(conn, session_id)}
+    except Exception:
+        return empty
+    finally:
+        conn.close()
+
+
 def session_messages(session_id: str, *, traces_dir=None) -> list[dict]:
     """Projected ``{role, text, ts, persona, user, host}`` rows; [] when
     the synced projection is unavailable for this session."""
-    path = db_path(Path(traces_dir) if traces_dir else None)
-    if path is None:
-        return []
-    conn = _connect(path)
-    if conn is None:
-        return []
-    try:
-        out = []
-        for r in _live(conn, session_id):
-            out.append(
-                {
-                    "role": str(r.get("role") or "user"),
-                    "text": str(r.get("text") or ""),
-                    "ts": str(r.get("ts") or ""),
-                    "persona": str(r.get("persona") or ""),
-                    "user": str(r.get("user") or ""),
-                    "host": str(r.get("host") or ""),
-                }
-            )
-        return out
-    except Exception:
-        return []
-    finally:
-        conn.close()
+    return session_projection(session_id, traces_dir=traces_dir)["live"]
 
 
 def find_latest_session(
@@ -145,12 +214,25 @@ def find_latest_session(
         rows: dict[str, dict] = {}
         for e, a, v in conn.execute(
             "SELECT e, a, v FROM v_current"
-            " WHERE a IN ('msg:session', 'msg:ts', 'msg:user', 'msg:deleted')"
+            " WHERE a IN ('msg:session', 'msg:ts', 'msg:user', 'msg:deleted',"
+            "            'msg:frame_id')"
         ):
             rows.setdefault(e, {})[a] = v
+        # session -> retired frame entities; a msg whose msg:frame_id names
+        # one is superseded (retired compaction summary) and must not count
+        # for recency — same liveness rule as _live().
+        retired: dict[str, set] = {}
+        for sid, fe in conn.execute(
+            "SELECT s.v, r.e FROM v_current r JOIN v_current s ON s.e = r.e"
+            " WHERE r.a = 'frame:retired' AND r.v = 'true'"
+            " AND s.a = 'frame:session'"
+        ):
+            retired.setdefault(str(sid), set()).add(fe)
         for r in rows.values():
             sid = str(r.get("msg:session") or "")
             if not sid or r.get("msg:deleted") == "true":
+                continue
+            if str(r.get("msg:frame_id") or "") in retired.get(sid, ()):
                 continue
             mu = str(r.get("msg:user") or "")
             # mirrors TraceStore.find_latest_session: a msg without a

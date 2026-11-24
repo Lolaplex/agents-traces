@@ -8,6 +8,8 @@ vendor folder. Memory holds pointers only. Binaries are referenced, not inlined
 from __future__ import annotations
 
 import os
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from .content import content_sha256, load_retained
@@ -84,45 +86,138 @@ def _prev_session_from_traces(session: str, store: TraceStore) -> str:
     return ""
 
 
+_MERGE_TS_SKEW_SEC = 5.0
+
+
+def _store_text_roots(traces_dir) -> list[str]:
+    """Local roots klanker strips to ``~`` before projecting ``msg:text`` —
+    this host's equivalents, so bodies compare equal across the sync."""
+    roots = {str(Path.home())}
+    for raw in (
+        os.environ.get("AGENTS_HOST_DIR") or "",
+        str(Path(traces_dir).parent) if traces_dir else "",
+    ):
+        if raw:
+            roots.add(raw)
+    return sorted((r for r in roots if len(r) > 3), key=len, reverse=True)
+
+
+def _norm_store_text(text: str, roots: list[str]) -> str:
+    for root in roots:
+        text = text.replace(root, "~")
+        if os.sep != "/":
+            text = text.replace(root.replace(os.sep, "/"), "~")
+    return text
+
+
+def _ts_close(a: str, b: str) -> bool:
+    """ISO timestamps within merge skew (peer clocks drift by seconds)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    try:
+        da = datetime.fromisoformat(a.replace("Z", "+00:00"))
+        db = datetime.fromisoformat(b.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return abs((da - db).total_seconds()) <= _MERGE_TS_SKEW_SEC
+
+
+def _same_turn(
+    ts: str,
+    role: str,
+    text: str,
+    other: tuple[str, str, str],
+) -> bool:
+    """One turn, two projections: ``(ts, role)`` pins it; for minor peer
+    clock skew the redaction-normalized body has to match too. Equal
+    bodies at distant ts are distinct turns (``"ok"`` sent twice)."""
+    ots, orole, otext = other
+    if role != orole:
+        return False
+    if ts and ots and ts == ots:
+        return True
+    return bool(text) and text == otext and _ts_close(ts, ots)
+
+
 def _merge_store_msgs(
     events: list[TraceEvent],
     session: str,
     store: TraceStore,
 ) -> list[TraceEvent]:
-    """Union in live ``msg:*`` rows the local JSONL lacks.
+    """Union in live ``msg:*`` rows the local JSONL lacks — and drop
+    locally cached turns the projection tombstoned.
 
     A peer's turns arrive via synced ``<ws>/store.db`` without the peer's
-    traces. Dedupe is the message body hash (``sha256`` metadata or the
-    resolved body), so turns both sides hold never duplicate. Live-only
-    rows: deleted/superseded msgs are already filtered in the projection.
+    traces. The projection is also the cross-host liveness oracle:
+    ``msg:deleted='true'`` rows and ACTIVE ``frame:*`` ts-spans suppress
+    local ``/undo``-ed or ``/compress``-covered copies that would
+    otherwise resurrect (a count shortcut can never see that). Dedupe of
+    the union is ``(ts, role)`` with a normalized-body fallback for skew,
+    so repeated identical turns survive and ``~``-redacted synced bodies
+    never duplicate their unredacted local twins.
     """
-    local_n = sum(1 for e in events if e.type == "message")
     try:
-        from .storemsgs import session_messages as _store_msgs
+        from .storemsgs import session_projection
 
-        remote = _store_msgs(session, traces_dir=store.traces_dir)
+        proj = session_projection(session, traces_dir=store.traces_dir)
     except Exception:
         return events
-    if not remote or local_n >= len(remote):
+    remote = proj.get("live") or []
+    dead = proj.get("dead") or []
+    spans = proj.get("frames") or []
+    if not remote and not dead and not spans:
         return events
-    have = set()
+
+    from .frames import frame_meta, is_frame
+
+    roots = _store_text_roots(store.traces_dir)
+    dead_turns = [
+        (
+            str(d.get("ts") or ""),
+            str(d.get("role") or "user").lower(),
+            _norm_store_text(str(d.get("text") or ""), roots),
+        )
+        for d in dead
+    ]
+
+    out: list[TraceEvent] = []
+    local_turns: list[tuple[str, str, str]] = []
     for e in events:
-        if e.type != "message":
+        ets = e.ts or ""
+        if is_frame(e):
+            # An active remote span over this frame's ts means a newer
+            # synced frame retired it — its summary must not replay.
+            if any(first <= ets <= last for first, last in spans):
+                continue
+            out.append(e)
+            content = str(frame_meta(e).get("content") or "")
+            local_turns.append(
+                (ets, "system", _norm_store_text(content, roots)))
             continue
-        md = e.metadata if isinstance(e.metadata, dict) else {}
-        sha = str(md.get("sha256") or "")
-        if not sha:
-            sha = content_sha256(_message_body(e, store))
-        have.add(sha)
-    out = list(events)
+        if e.type == "message":
+            role = str(_meta(e).get("role") or "user").lower()
+            body = _norm_store_text(_message_body(e, store), roots)
+            if any(first <= ets <= last for first, last in spans):
+                continue  # covered by a synced frame the local log lacks
+            if any(_same_turn(ets, role, body, d) for d in dead_turns):
+                continue  # tombstoned by a peer's /undo
+            local_turns.append((ets, role, body))
+        out.append(e)
+
     for m in remote:
-        if content_sha256(m["text"]) in have:
+        mts = str(m.get("ts") or "")
+        mrole = str(m.get("role") or "user").lower()
+        mtext = str(m.get("text") or "")
+        mnorm = _norm_store_text(mtext, roots)
+        if any(_same_turn(mts, mrole, mnorm, t) for t in local_turns):
             continue
         md: dict[str, Any] = {
             "role": m["role"],
-            "content": m["text"],
-            "sha256": content_sha256(m["text"]),
-            "chars": len(m["text"]),
+            "content": mtext,
+            "sha256": content_sha256(mtext),
+            "chars": len(mtext),
             "source": "store",
         }
         if m.get("persona"):
@@ -131,9 +226,10 @@ def _merge_store_msgs(
             md["user"] = m["user"]
         ev = TraceEvent(session=session, type="message", origin="store",
                         metadata=md)
-        if m.get("ts"):
-            ev.ts = m["ts"]
+        if mts:
+            ev.ts = mts
         out.append(ev)
+        local_turns.append((mts, mrole, mnorm))
     return out
 
 
