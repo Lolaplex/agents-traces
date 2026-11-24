@@ -504,6 +504,17 @@ class IdentityStore:
                 channel=channel, user=str(user), project=project, alias=alias
             )
         if not sid:
+            # Empty local traces on this host: resume via the synced
+            # msg:* projection in <ws>/store.db (no-op when unavailable).
+            try:
+                from .storemsgs import find_latest_session
+
+                sid = find_latest_session(
+                    user=str(user), alias=alias,
+                    max_idle_hours=max_idle_hours)
+            except Exception:
+                sid = None
+        if not sid:
             return None
         return SessionRecord(id=sid, user="", start_date=today_utc(), created_at="")
 

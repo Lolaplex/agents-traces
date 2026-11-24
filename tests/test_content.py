@@ -353,7 +353,7 @@ def test_mcp_read_content(monkeypatch):
     with tempfile_store() as store:
         import agents_traces.mcp_server as mcp_mod
 
-        monkeypatch.setattr(mcp_mod, "store", store)
+        monkeypatch.setattr(mcp_mod, "_store", lambda: store)
         body = _big_body()
         sid = "ses_mcp"
         record_message(sid, "user", body, store=store)

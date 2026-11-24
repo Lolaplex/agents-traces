@@ -84,6 +84,59 @@ def _prev_session_from_traces(session: str, store: TraceStore) -> str:
     return ""
 
 
+def _merge_store_msgs(
+    events: list[TraceEvent],
+    session: str,
+    store: TraceStore,
+) -> list[TraceEvent]:
+    """Union in live ``msg:*`` rows the local JSONL lacks.
+
+    A peer's turns arrive via synced ``<ws>/store.db`` without the peer's
+    traces. Dedupe is the message body hash (``sha256`` metadata or the
+    resolved body), so turns both sides hold never duplicate. Live-only
+    rows: deleted/superseded msgs are already filtered in the projection.
+    """
+    local_n = sum(1 for e in events if e.type == "message")
+    try:
+        from .storemsgs import session_messages as _store_msgs
+
+        remote = _store_msgs(session, traces_dir=store.traces_dir)
+    except Exception:
+        return events
+    if not remote or local_n >= len(remote):
+        return events
+    have = set()
+    for e in events:
+        if e.type != "message":
+            continue
+        md = e.metadata if isinstance(e.metadata, dict) else {}
+        sha = str(md.get("sha256") or "")
+        if not sha:
+            sha = content_sha256(_message_body(e, store))
+        have.add(sha)
+    out = list(events)
+    for m in remote:
+        if content_sha256(m["text"]) in have:
+            continue
+        md: dict[str, Any] = {
+            "role": m["role"],
+            "content": m["text"],
+            "sha256": content_sha256(m["text"]),
+            "chars": len(m["text"]),
+            "source": "store",
+        }
+        if m.get("persona"):
+            md["persona"] = m["persona"]
+        if m.get("user"):
+            md["user"] = m["user"]
+        ev = TraceEvent(session=session, type="message", origin="store",
+                        metadata=md)
+        if m.get("ts"):
+            ev.ts = m["ts"]
+        out.append(ev)
+    return out
+
+
 def assemble_messages(
     session: str,
     *,
@@ -127,6 +180,7 @@ def assemble_messages(
                 all_events = prev_events + all_events
         except Exception:
             pass
+    all_events = _merge_store_msgs(all_events, session, target)
     all_events.sort(key=lambda e: e.ts or "")
 
     # Compaction frames replace the events they cover (see frames.py).

@@ -35,7 +35,16 @@ try:
 except Exception:
     pass
 
-store = TraceStore()
+def _store() -> TraceStore:
+    """Fresh store per tool call — the workspace can change between
+    invocations; a module-level instance would freeze the import-time
+    env forever."""
+    try:
+        from agents_workspace import Workspace
+
+        return TraceStore(Workspace.from_env().traces)
+    except Exception:
+        return TraceStore()
 
 
 @mcp.tool()
@@ -49,6 +58,7 @@ def get_last_session_trace(session_id: Optional[str] = None, limit: int = 40) ->
         session_id: Optional session identifier (e.g. 'ses_abc' or 'trace:ses_abc'). If not provided, inspects the latest active session.
         limit: Max number of recent events to return (default 40).
     """
+    store = _store()
     clean_sid = session_id.strip() if session_id else None
     if clean_sid and clean_sid.startswith("trace:"):
         clean_sid = clean_sid[len("trace:") :].strip()
@@ -77,6 +87,7 @@ def get_recent_errors(limit: int = 10, session_id: Optional[str] = None) -> str:
         limit: Number of recent errors to retrieve (default 10).
         session_id: Optional session ID filter (e.g. 'ses_abc' or 'trace:ses_abc').
     """
+    store = _store()
     clean_sid = session_id.strip() if session_id else None
     if clean_sid and clean_sid.startswith("trace:"):
         clean_sid = clean_sid[len("trace:") :].strip()
@@ -117,6 +128,7 @@ def get_session_stats(days: int = 1) -> str:
     Args:
         days: Number of days to aggregate (default 1 = today).
     """
+    store = _store()
     files = store.list_trace_files(days=days)
     events = store.iter_events(files=files)
     stats = compute_stats(events)
@@ -133,6 +145,7 @@ def get_model_stats(model: Optional[str] = None, days: int = 7) -> str:
         model: Optional filter for a specific model (e.g. 'gemini-3.7-flash', 'claude-3.7-sonnet'). If omitted, breaks down all active models.
         days: Number of recent days of trace logs to analyze (default 7).
     """
+    store = _store()
     files = store.list_trace_files(days=days)
     events = store.iter_events(files=files)
     breakdown = compute_model_breakdown(events)
@@ -200,7 +213,7 @@ def record_trace(
         lines_removed=lines_removed,
         metadata=metadata,
     )
-    store.append(event)
+    _store().append(event)
     return json.dumps({"status": "recorded", "ts": event.ts, "session": session})
 
 
@@ -210,7 +223,7 @@ def ingest_traces() -> str:
     Auto-ingest recent IDE transcripts from Antigravity, Claude, Cursor, and Roo-Cline into local daily traces.
     """
     from .ingest import ingest_all_ide_transcripts
-    res = ingest_all_ide_transcripts(store=store)
+    res = ingest_all_ide_transcripts(store=_store())
     return json.dumps(res, indent=2)
 
 
@@ -218,7 +231,7 @@ def ingest_traces() -> str:
 def session_snap(limit: int = 20) -> str:
     """Recent user messages from the traces store (live MCP + ingested vendor chats)."""
     from .session_view import session_snap as view_snap
-    return view_snap(limit=limit, store=store)
+    return view_snap(limit=limit, store=_store())
 
 
 @mcp.tool()
@@ -228,7 +241,7 @@ def session_grep(pattern: str, since: str = "", until: str = "") -> str:
     ``since`` and ``until`` are ISO timestamps or ``YYYY-MM-DD`` (that whole UTC day).
     """
     from .session_view import session_grep as view_grep
-    return view_grep(pattern=pattern, since=since, until=until, store=store)
+    return view_grep(pattern=pattern, since=since, until=until, store=_store())
 
 
 @mcp.tool()
@@ -255,7 +268,7 @@ def read_content(session_id: str, digest: str, offset: int = 0, limit: int = -1)
             digest,
             offset=offset,
             limit=None if limit < 0 else limit,
-            store=store,
+            store=_store(),
         )
     except ContentError as exc:
         return json.dumps(
@@ -288,6 +301,7 @@ def export_session(
     from .export import ExportError, export_session as export_session_text
 
     sid = session_id.strip() if session_id else ""
+    store = _store()
     if not sid:
         sid = store.get_last_session_id() or ""
     if not sid:
@@ -308,7 +322,7 @@ def export_session(
 def session_tail(session_id: str = "", limit: int = 10) -> str:
     """Tail recent session messages from traces for one session id or the latest lines."""
     from .session_view import session_tail as view_tail
-    return view_tail(session_id=session_id, limit=limit, store=store)
+    return view_tail(session_id=session_id, limit=limit, store=_store())
 
 
 @mcp.tool()
@@ -323,7 +337,7 @@ def session_compact(session_id: str, keep_last: int = 6, content: str = "") -> s
 
     frame = compact_session(
         session_id,
-        store=store,
+        store=_store(),
         keep_last=keep_last,
         content=content,
         source="mcp" if content else "deterministic",
@@ -351,6 +365,7 @@ def trace_seal(session_id: Optional[str] = None, output_path: Optional[str] = No
     from pathlib import Path
     from .audit import GENESIS, events_to_records, links_to_jsonl, seal_records
 
+    store = _store()
     clean_sid = session_id.strip() if session_id else None
     if clean_sid and clean_sid.startswith("trace:"):
         clean_sid = clean_sid[len("trace:") :].strip()
@@ -434,6 +449,7 @@ def trace_audit(
         records = parse_transcript_text(p.read_text(encoding="utf-8", errors="replace"))
         target_session = p.name
     else:
+        store = _store()
         clean_sid = session_id.strip() if session_id else None
         if clean_sid and clean_sid.startswith("trace:"):
             clean_sid = clean_sid[len("trace:") :].strip()
