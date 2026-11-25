@@ -96,6 +96,48 @@ def test_custom_instructions_blob_does_not_inject_english_defaults():
     assert "You are a personal agent" not in xml
 
 
+def test_template_default_rendering_is_byte_identical():
+    parts = PromptParts(instructions="do work", session_id="ses_x", start_date="2026-01-01")
+    assert render_system_prompt(parts) == render_system_prompt(parts, template="")
+
+
+def test_template_splices_sections_and_drops_unreferenced_ones():
+    parts = PromptParts(
+        instructions="do work",
+        session_id="ses_x",
+        start_date="2026-01-01",
+        user_id="fabian",
+    )
+    xml = render_system_prompt(parts, template="{instructions}\n--break--\n{skill_catalog}")
+    # slots splice as whole pre-indented sections (whitespace is cosmetic in XML)
+    assert xml.startswith("  <instructions>")
+    assert "<text>do work</text>" in xml
+    assert "--break--" in xml
+    assert "<skill_catalog>" in xml
+    # runtime_context was not referenced: no session metadata leaks.
+    assert "ses_x" not in xml
+    assert "start_date" not in xml
+
+
+def test_template_unknown_slots_pass_through_untouched():
+    xml = render_system_prompt(
+        PromptParts(instructions="x", session_id="ses_x"),
+        template="{instructions}\n{future_slot}",
+    )
+    assert "{future_slot}" in xml
+
+
+def test_system_messages_template_forwarded():
+    from agents_traces.prompt import system_messages
+
+    msgs = system_messages(
+        PromptParts(instructions="x", session_id="ses_x", start_date="2026-01-01"),
+        template="{instructions}",
+    )
+    assert len(msgs) == 1
+    assert "ses_x" not in msgs[0]["content"]
+
+
 def test_collapse_evicts_old_large_stdio_not_user_text():
     from agents_traces.prompt import collapse_old_stdio, content_digest, preview_text
 
