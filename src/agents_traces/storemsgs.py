@@ -18,6 +18,10 @@ import os
 from pathlib import Path
 from typing import Optional
 
+# SQLite caps bound variables at 999 on older builds — chunk every literal
+# IN () well under that.
+_CHUNK = 500
+
 
 def db_path(traces_dir: Optional[Path] = None) -> Optional[Path]:
     """``<ws>/store.db`` next to ``traces_dir``, else the env workspace's.
@@ -55,16 +59,17 @@ def _connect(path: Path):
 
 
 def _entity_ords(conn, entities: list[str]) -> dict[str, str]:
-    if not entities:
-        return {}
-    marks = ",".join("?" for _ in entities)
-    return {
-        e: str(o or "")
+    ents = [str(e) for e in entities]
+    ords: dict[str, str] = {}
+    for i in range(0, len(ents), _CHUNK):
+        part = ents[i:i + _CHUNK]
+        marks = ",".join("?" for _ in part)
         for e, o in conn.execute(
             f"SELECT e, MAX(ord) FROM datom WHERE e IN ({marks}) GROUP BY e",
-            entities,
-        )
-    }
+            part,
+        ):
+            ords[e] = str(o or "")
+    return ords
 
 
 def _msg_rows(conn, session_id: str) -> dict[str, dict]:

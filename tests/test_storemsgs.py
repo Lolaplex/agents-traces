@@ -1,6 +1,7 @@
 """Synced store.db msg:* readers + assemble merge + identity resume."""
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,44 @@ def test_live_msgs_read(store_db, monkeypatch):
     assert msgs[0]["role"] == "user"
     assert msgs[0]["ts"] == "2026-11-22T10:00:00Z"
     assert msgs[0]["user"] == "telegram:42"
+
+
+def test_entity_ords_chunked_at_500(store_db):
+    """601 entities union across <=500-variable chunks; SQLite builds vary,
+    so the fake connection refuses anything above the intended chunk size."""
+    _path, conn = store_db
+    tx = conn.execute(
+        "INSERT INTO tx (op, agent, wrapper)"
+        " VALUES ('assert', 'pytest', 'pytest')"
+    ).lastrowid
+    entities = []
+    expected = {}
+    datoms = []
+    base = 1769000000000
+    for i in range(601):
+        e = f"msg:chunk:{i:03d}"
+        ord_key = f"{base + i:013d}.00000.proj"
+        entities.append(e)
+        expected[e] = ord_key
+        datoms.append((e, "msg:text", f"m{i}", tx, 1, ord_key))
+    conn.executemany(
+        "INSERT INTO entity (id, created_tx) VALUES (?, ?)",
+        [(e, tx) for e in entities],
+    )
+    conn.executemany(
+        "INSERT INTO datom (e, a, v, tx, added, ord) VALUES (?, ?, ?, ?, ?, ?)",
+        datoms,
+    )
+
+    class Cap500:
+        def execute(self, sql, params=()):
+            if len(params) > 500:
+                raise sqlite3.OperationalError("too many SQL variables")
+            return conn.execute(sql, params)
+
+    from agents_traces import storemsgs
+
+    assert storemsgs._entity_ords(Cap500(), entities) == expected
 
 
 def test_deleted_and_retired_hidden(store_db, monkeypatch):
