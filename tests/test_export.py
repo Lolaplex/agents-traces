@@ -177,7 +177,7 @@ def test_mcp_export(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     import agents_traces.mcp_server as mcp_mod
 
     store = TraceStore(tmp_path)
-    monkeypatch.setattr(mcp_mod, "store", store)
+    monkeypatch.setattr(mcp_mod, "_store", lambda: store)
     record_message("ses_mcp", "user", "mcp-hello", store=store)
     raw = mcp_mod.export_session(session_id="ses_mcp", format="json", include_tools=False)
     payload = json.loads(raw[raw.find("{") :])

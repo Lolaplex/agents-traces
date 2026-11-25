@@ -9,7 +9,7 @@ import agents_traces.mcp_server as mcp_mod
 def test_mcp_tools(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         fake_store = TraceStore(traces_dir=tmpdir)
-        monkeypatch.setattr(mcp_mod, "store", fake_store)
+        monkeypatch.setattr(mcp_mod, "_store", lambda: fake_store)
         
         # Test record_trace
         res = mcp_mod.record_trace(

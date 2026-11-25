@@ -259,7 +259,7 @@ def test_cli_seal_verify_audit(monkeypatch):
 def test_mcp_seal_verify_audit(monkeypatch):
     with tempfile.TemporaryDirectory() as tmpdir:
         fake_store = TraceStore(traces_dir=tmpdir)
-        monkeypatch.setattr(mcp_mod, "store", fake_store)
+        monkeypatch.setattr(mcp_mod, "_store", lambda: fake_store)
 
         fake_store.append(
             TraceEvent(
