@@ -11,6 +11,7 @@ Never put clock between system and history; that busts the history prefix.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -59,8 +60,23 @@ def _block(tag: str, body: str, indent: str = "    ") -> str:
     return f"{indent}<{tag}>{_e(text)}</{tag}>"
 
 
-def render_system_prompt(parts: PromptParts) -> str:
-    """XML system prefix. Identical bytes across turns of the same session."""
+DEFAULT_TEMPLATE = (
+    "<system_prompt>\n"
+    "{instructions}\n"
+    "{skill_catalog}\n"
+    "{runtime_context}\n"
+    "</system_prompt>"
+)
+
+def render_system_prompt(parts: PromptParts, template: str = "") -> str:
+    """XML system prefix. Identical bytes across turns of the same session.
+
+    ``template`` is an optional frame override: each ``{slot}`` is replaced
+    with that whole rendered section, so a deployment may reorder, rewrap,
+    extend, or drop entire sections (e.g. ``{runtime_context}`` for a
+    frozen-world replay). Slots: ``{instructions}``, ``{skill_catalog}``,
+    ``{runtime_context}``. Unknown slots are left untouched.
+    """
     inner: list[str] = []
     if parts.instructions.strip():
         inner.append(_block("text", parts.instructions))
@@ -102,19 +118,23 @@ def render_system_prompt(parts: PromptParts) -> str:
     runtime.append(f'    <session {" ".join(sess_attrs)}/>')
     runtime_body = "\n".join(x for x in runtime if x)
 
-    return (
-        "<system_prompt>\n"
-        "  <instructions>\n"
-        f"{instructions}\n"
-        "  </instructions>\n"
-        "  <skill_catalog>\n"
-        f"{catalog}\n"
-        "  </skill_catalog>\n"
-        "  <runtime_context>\n"
-        f"{runtime_body}\n"
-        "  </runtime_context>\n"
-        "</system_prompt>"
-    )
+    sections = {
+        "instructions": (
+            "  <instructions>\n" + instructions + "\n  </instructions>"
+        ),
+        "skill_catalog": (
+            "  <skill_catalog>\n" + catalog + "\n  </skill_catalog>"
+        ),
+        "runtime_context": (
+            "  <runtime_context>\n" + runtime_body + "\n  </runtime_context>"
+        ),
+    }
+
+    frame = template.strip() or DEFAULT_TEMPLATE
+    out = frame
+    for slot, body in sections.items():
+        out = out.replace("{" + slot + "}", body)
+    return out
 
 
 def clock_message(
@@ -274,8 +294,14 @@ def stamp_content(ts: str, content: str) -> str:
     text = content or ""
     if not ts or text.startswith("<ts>"):
         return text
+    # AGENTS_CLOCK=0 suppresses every real-time leak for frozen/replay
+    # worlds: <clock>, session start_date, and these event timestamps.
+    if os.environ.get("AGENTS_CLOCK", "1").strip().lower() in (
+        "0", "false", "no", "off"
+    ):
+        return text
     return f"<ts>{ts}</ts>\n{text}"
 
 
-def system_messages(parts: PromptParts) -> list[dict[str, str]]:
-    return [{"role": "system", "content": render_system_prompt(parts)}]
+def system_messages(parts: PromptParts, template: str = "") -> list[dict[str, str]]:
+    return [{"role": "system", "content": render_system_prompt(parts, template)}]
