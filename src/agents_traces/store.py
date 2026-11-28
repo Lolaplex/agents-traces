@@ -134,24 +134,61 @@ class TraceStore:
             b = _json.dumps(val, ensure_ascii=False)
             return (a,) if a == b else (a, b)
 
-        sid_needles = _needles(session_id)
-        type_needles = _needles(event_type)
-        status_needles = _needles(status)
+        sid_needles = tuple(n.encode("utf-8") for n in _needles(session_id))
+        type_needles = tuple(n.encode("utf-8") for n in _needles(event_type))
+        status_needles = tuple(n.encode("utf-8") for n in _needles(status))
+        has_fast_filter = bool(sid_needles or type_needles or status_needles or only_errors)
+
+        def _bytes_match(buf: bytes) -> bool:
+            if sid_needles and not any(n in buf for n in sid_needles):
+                return False
+            if type_needles and not any(n in buf for n in type_needles):
+                return False
+            if status_needles and not any(n in buf for n in status_needles):
+                return False
+            if only_errors and b"error" not in buf:
+                return False
+            return True
 
         for file_path in target_files:
             if not file_path.exists():
                 continue
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                for line in f:
-                    if sid_needles and not any(n in line for n in sid_needles):
+            if has_fast_filter:
+                try:
+                    size = file_path.stat().st_size
+                except OSError:
+                    continue
+                if size == 0:
+                    continue
+                if size <= 32 * 1024 * 1024:
+                    raw_blob = file_path.read_bytes()
+                    if not _bytes_match(raw_blob):
                         continue
-                    if type_needles and not any(n in line for n in type_needles):
+                    raw_lines: Iterable[bytes] = raw_blob.splitlines()
+                else:
+                    raw_lines = ()
+                if raw_lines:
+                    for raw_line in raw_lines:
+                        if not _bytes_match(raw_line):
+                            continue
+                        event = TraceEvent.from_json(raw_line.decode("utf-8", errors="replace"))
+                        if event is None:
+                            continue
+                        if session_id and event.session != session_id:
+                            continue
+                        if event_type and event.type != event_type:
+                            continue
+                        if status and event.status != status:
+                            continue
+                        if only_errors and event.type != "error" and event.status != "error" and not event.error:
+                            continue
+                        yield event
+                    continue
+            with open(file_path, "rb") as f:
+                for raw_line in f:
+                    if has_fast_filter and not _bytes_match(raw_line):
                         continue
-                    if status_needles and not any(n in line for n in status_needles):
-                        continue
-                    if only_errors and "error" not in line:
-                        continue
-                    event = TraceEvent.from_json(line)
+                    event = TraceEvent.from_json(raw_line.decode("utf-8", errors="replace"))
                     if event is None:
                         continue
                     if session_id and event.session != session_id:

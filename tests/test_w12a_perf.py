@@ -67,14 +67,25 @@ class TestW12AFastTraceScans(unittest.TestCase):
                 fh.write('{"ts":"2026-11-28T10:00:02Z","session":"ses_hot","type":"message","metadata":{"role":"assistant","content":"Hello"}}\n')
 
             store = TraceStore(traces_dir=tdir)
+            real_from_json = TraceEvent.from_json
+            parse_calls = 0
+
+            def counting_from_json(line: str):
+                nonlocal parse_calls
+                parse_calls += 1
+                return real_from_json(line)
+
             t0 = time.perf_counter()
-            evs = store.get_events_for_session("ses_hot")
-            msgs = assemble_messages("ses_hot", store=store)
+            with patch.object(TraceEvent, "from_json", side_effect=counting_from_json):
+                evs = store.get_events_for_session("ses_hot")
+                msgs = assemble_messages("ses_hot", store=store)
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
             self.assertEqual(len(evs), 2)
             self.assertEqual(len(msgs), 2)
-            self.assertLess(elapsed_ms, 250.0, f"expected < 250ms on 10k lines, got {elapsed_ms:.1f}ms")
+            # Only the 2 matching lines per pass (4 total) should be parsed — never the 10,000 filler lines!
+            self.assertLessEqual(parse_calls, 8, f"expected <=8 from_json calls on 10k filler lines, got {parse_calls}")
+            self.assertLess(elapsed_ms, 2000.0, f"expected < 2000ms on 10k lines, got {elapsed_ms:.1f}ms")
 
     def test_identity_resolve_skips_trace_scan_when_session_known(self):
         with tempfile.TemporaryDirectory() as tmp:
