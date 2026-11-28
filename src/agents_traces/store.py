@@ -123,13 +123,34 @@ class TraceStore:
         only_errors: bool = False,
     ) -> Generator[TraceEvent, None, None]:
         """Stream events generator with zero memory overhead."""
+        import json as _json
+
         target_files = list(files) if files is not None else self.list_trace_files()
-        
+
+        def _needles(val: Optional[str]) -> tuple[str, ...]:
+            if not val:
+                return ()
+            a = _json.dumps(val)
+            b = _json.dumps(val, ensure_ascii=False)
+            return (a,) if a == b else (a, b)
+
+        sid_needles = _needles(session_id)
+        type_needles = _needles(event_type)
+        status_needles = _needles(status)
+
         for file_path in target_files:
             if not file_path.exists():
                 continue
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
+                    if sid_needles and not any(n in line for n in sid_needles):
+                        continue
+                    if type_needles and not any(n in line for n in type_needles):
+                        continue
+                    if status_needles and not any(n in line for n in status_needles):
+                        continue
+                    if only_errors and "error" not in line:
+                        continue
                     event = TraceEvent.from_json(line)
                     if event is None:
                         continue
