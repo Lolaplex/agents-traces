@@ -573,9 +573,16 @@ class IdentityStore:
 
         if session and session.lower() not in ("new", "new_session"):
             session = _valid_id(session, "session")
-            trace_uid = self._user_id_from_traces(session)
-            person = self._ensure_user(alias=alias, user_id=user_id or trace_uid)
             existing = sessions.get(session)
+            trace_uid = (
+                ""
+                if (user_id or (existing is not None and existing.user))
+                else self._user_id_from_traces(session)
+            )
+            person = self._ensure_user(
+                alias=alias,
+                user_id=user_id or (existing.user if existing is not None else "") or trace_uid,
+            )
             rec = existing or SessionRecord(
                 id=session,
                 user=person.id,

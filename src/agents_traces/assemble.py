@@ -240,6 +240,7 @@ def assemble_messages(
     limit: int = 24,
     days: int = 30,
     include_tools: bool = False,
+    include_prev_session: bool = True,
 ) -> list[dict[str, Any]]:
     """Rebuild a prompt projection, not the log.
 
@@ -255,16 +256,18 @@ def assemble_messages(
         if e.type in wanted
     ]
     if len(all_events) < limit and days is not None:
-        # Sparse recent history: a resumed session can hold older events
-        # outside the scan window (long-idle user, ingested archives).
-        # Output stays bounded by limit; only the file scan widens.
-        files = target.list_trace_files()
-        all_events = [
-            e
-            for e in target.iter_events(files=files, session_id=session)
-            if e.type in wanted
-        ]
-    if len(all_events) < limit and store is None:
+        # Sparse recent history: widen only across files not yet scanned.
+        scanned = set(files)
+        all_files = target.list_trace_files()
+        extra_files = [f for f in all_files if f not in scanned]
+        if extra_files:
+            all_events.extend(
+                e
+                for e in target.iter_events(files=extra_files, session_id=session)
+                if e.type in wanted
+            )
+        files = all_files
+    if include_prev_session and len(all_events) < limit and store is None:
         try:
             prev_sid = _prev_session_from_traces(session, target)
             if prev_sid:
